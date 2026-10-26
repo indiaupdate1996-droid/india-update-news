@@ -1,4 +1,4 @@
-﻿import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
 import { getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, getDoc } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 
@@ -171,7 +171,7 @@ grid.addEventListener('click', async e => {
       <h2 class="article-title">${safeText(a.title)}</h2>
       <p class="article-text">${safeText(a.summary)}</p>
       <p class="article-text" style="white-space:pre-wrap">${safeText(a.body)}</p>
-      ${a.externalUrl ? <p><a class="read-btn" href="${safeText(a.externalUrl)}" target="_blank" rel="noopener">मूल स्रोत पर पढ़ें ↗️</a></p> : ''}
+      ${a.externalUrl ? `<p><a class="read-btn" href="${safeText(a.externalUrl)}" target="_blank" rel="noopener">मूल स्रोत पर पढ़ें ↗️</a></p>` : ''}
       ${a.demo ? '<div class="notice">यह डेमो सामग्री है। इसे वास्तविक समाचार समझकर साझा न करें।</div>' : ''}
       <div class="dialog-actions">
         <button id="shareArticle">खबर शेयर करें ↗️</button>
