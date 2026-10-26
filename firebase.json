@@ -1,0 +1,9 @@
+{
+  "firestore": { "rules": "firestore.rules" },
+  "hosting": {
+    "public": ".",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**", "README.md", "ADMIN_AND_AUTO_NEWS_GUIDE_HI.txt", "firestore.rules", ".firebaserc.example", "**/*.zip"],
+    "cleanUrls": true,
+    "trailingSlash": false
+  }
+}

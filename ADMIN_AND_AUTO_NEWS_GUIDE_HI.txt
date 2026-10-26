@@ -1,0 +1,13 @@
+INDIA UPDATE — Firebase और सुरक्षित ऑनलाइन एडमिन
+
+इस पैकेज में पुराने डेमो PIN की जगह Firebase ईमेल/पासवर्ड लॉगिन है। खबरें Firestore में सेव होती हैं और सभी पाठकों को लाइव दिखाई दे सकती हैं।
+
+पहले README.md में दिए गए चरण पूरे करें:
+1. Firebase Authentication में Email/Password चालू करें और अपना user बनाएँ।
+2. Firestore Database बनाएँ।
+3. Authentication से UID कॉपी करके Firestore में admins collection के अंदर उसी UID का document बनाएँ। उसमें role (string) = admin रखें।
+4. firestore.rules की सामग्री Firestore Rules में Publish करें।
+5. Authentication Settings में अपना hosting domain Authorized domains में जोड़ें।
+6. Firebase CLI से `firebase deploy --only firestore:rules,hosting` चलाएँ।
+
+ध्यान दें: केवल ZIP extract करने से साइट ऑनलाइन नहीं होती। Deploy के लिए कंप्यूटर पर Firebase CLI या Git-based hosting workflow चाहिए। डेमो PIN 2468 अब लॉगिन के लिए उपयोग नहीं होता।
