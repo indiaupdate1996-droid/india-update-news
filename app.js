@@ -1,5 +1,5 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, sendPasswordResetEmail, signOut } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
 import { getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, getDoc } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 
 // Firebase web config
@@ -240,7 +240,7 @@ document.getElementById('year').textContent = new Date().getFullYear();
 document.getElementById('adminOpen').onclick = () => adminDialog.showModal();
 document.getElementById('adminClose').onclick = () => adminDialog.close();
 
-document.getElementById('adminLogin').onclick = async () => {
+// Admin login with clear Firebase error messages document.getElementById('adminLogin').onclick = async () => {   const email = document.getElementById('adminEmail').value.trim();   const password = document.getElementById('adminPassword').value;    if (!email || !password) {     alert('कृपया ईमेल और पासवर्ड भरें।');     return;   }    try {     await signInWithEmailAndPassword(auth, email, password);   } catch (err) {     console.error('Admin login error:', err);      const messages = {       'auth/invalid-email': 'ईमेल का फॉर्मेट सही नहीं है।',       'auth/user-not-found': 'इस ईमेल से कोई अकाउंट नहीं मिला।',       'auth/wrong-password': 'पासवर्ड गलत है।',       'auth/invalid-credential': 'ईमेल या पासवर्ड गलत है।',       'auth/too-many-requests': 'बहुत बार कोशिश हुई है। थोड़ी देर बाद प्रयास करें।',       'auth/network-request-failed': 'इंटरनेट कनेक्शन जाँचें।',       'auth/operation-not-allowed': 'Firebase में Email/Password लॉगिन चालू नहीं है।'     };      alert(messages[err.code] || 'लॉगिन नहीं हुआ। Firebase Authentication सेटिंग जाँचें।');   } };  // Forgot password button (automatically added to login form) const loginForm = document.getElementById('loginForm'); const forgotBtn = document.createElement('button');  forgotBtn.type = 'button'; forgotBtn.id = 'adminForgotPassword'; forgotBtn.textContent = 'पासवर्ड भूल गए?'; forgotBtn.className = 'read-btn'; forgotBtn.style.marginTop = '10px';  loginForm.appendChild(forgotBtn);  forgotBtn.onclick = async () => {   const email = document.getElementById('adminEmail').value.trim();    if (!email) {     alert('पहले अपना एडमिन ईमेल भरें।');     document.getElementById('adminEmail').focus();     return;   }    try {     await sendPasswordResetEmail(auth, email);     alert('पासवर्ड रीसेट करने का लिंक आपके ईमेल पर भेज दिया गया है।');   } catch (err) {     console.error('Password reset error:', err);      const messages = {       'auth/invalid-email': 'ईमेल का फॉर्मेट सही नहीं है।',       'auth/user-not-found': 'इस ईमेल से कोई अकाउंट नहीं मिला।',       'auth/too-many-requests': 'बहुत बार कोशिश हुई है। थोड़ी देर बाद प्रयास करें।',       'auth/network-request-failed': 'इंटरनेट कनेक्शन जाँचें।'     };      alert(messages[err.code] || 'पासवर्ड रीसेट ईमेल नहीं भेजा जा सका। Firebase सेटिंग जाँचें।');   } };
   const email = document.getElementById('adminEmail').value.trim();
   const password = document.getElementById('adminPassword').value;
 
@@ -251,7 +251,7 @@ document.getElementById('adminLogin').onclick = async () => {
     console.error(err);
   }
 };
-
+document.getElementById('adminLogout').onclick = () => signOut(auth);
 document.getElementById('adminLogout').onclick = () => signOut(auth);
 
 onAuthStateChanged(auth, async user => {
