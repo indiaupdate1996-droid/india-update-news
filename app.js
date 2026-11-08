@@ -1,7 +1,6 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
 import { getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, getDoc } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
-import { getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-storage.js';
 
 // Firebase web config
 const firebaseConfig = {
@@ -17,7 +16,6 @@ const firebaseConfig = {
 const firebaseApp = initializeApp(firebaseConfig);
 const auth = getAuth(firebaseApp);
 const db = getFirestore(firebaseApp);
-const storage = getStorage(firebaseApp);
 
 const articles = [
  {id:'demo-1',category:'राजस्थान',emoji:'🌦️',date:'डेमो खबर',title:'राजस्थान मौसम अपडेट: अपने जिले का ताज़ा पूर्वानुमान देखें',summary:'मौसम से जुड़ी खबर प्रकाशित करने से पहले IMD और स्थानीय प्रशासन की आधिकारिक जानकारी की पुष्टि करें।',body:'यह नमूना लेख है, वास्तविक मौसम बुलेटिन नहीं। अपनी खबर प्रकाशित करते समय तारीख, प्रभावित जिले, चेतावनी का स्तर और मौसम विभाग का आधिकारिक स्रोत अवश्य जोड़ें।',color:'weather',demo:true},
@@ -78,9 +76,9 @@ function render() {
 
   grid.innerHTML = list.map(a => `
     <article class="news-card">
-      <div class="thumb ${safeText(a.color || 'custom')}">
+      <div class="thumb ${safeText(a.color || 'custom')}" style="${a.imageUrl ? `background-image:linear-gradient(#0002,#0002),url('${safeText(a.imageUrl)}');background-size:cover;background-position:center` : ''}">
         <span class="tag">${safeText(a.category)}</span>
-        ${a.imageUrl ? `<img class="news-photo" src="${safeText(a.imageUrl)}" alt="${safeText(a.title)}" loading="lazy">` : `<span class="emoji">${safeText(a.emoji || '📰')}</span>`}
+        ${a.imageUrl ? '' : `<span class="emoji">${safeText(a.emoji || '📰')}</span>`}
       </div>
       <div class="card-body">
         <div class="card-meta">
@@ -169,7 +167,7 @@ grid.addEventListener('click', async e => {
 
     document.getElementById('articleContent').innerHTML = `
       <span class="eyebrow red">${safeText(a.category)} · ${safeText(a.date || '')}</span>
-      ${a.imageUrl ? `<img class="article-photo" src="${safeText(a.imageUrl)}" alt="${safeText(a.title)}">` : `<div class="article-hero">${safeText(a.emoji || '📰')}</div>`}
+      ${a.imageUrl ? `<img src="${safeText(a.imageUrl)}" alt="${safeText(a.title)}" style="width:100%;max-height:340px;object-fit:cover;border-radius:14px;margin:15px 0">` : `<div class="article-hero">${safeText(a.emoji || '📰')}</div>`}
       <h2 class="article-title">${safeText(a.title)}</h2>
       <p class="article-text">${safeText(a.summary)}</p>
       <p class="article-text" style="white-space:pre-wrap">${safeText(a.body)}</p>
@@ -249,8 +247,17 @@ document.getElementById('adminLogin').onclick = async () => {
   try {
     await signInWithEmailAndPassword(auth, email, password);
   } catch (err) {
-    alert('लॉगिन नहीं हुआ। ईमेल/पासवर्ड और Firebase Authentication सेटिंग जाँचें।');
-    console.error(err);
+    console.error('Firebase sign-in failed:', err.code, err.message);
+    const messages = {
+      'auth/invalid-credential': 'ईमेल या पासवर्ड सही नहीं है। Firebase Authentication → Users में इसी ईमेल का अकाउंट जाँचें; जरूरत हो तो Reset password करें।',
+      'auth/wrong-password': 'पासवर्ड गलत है। Firebase Authentication → Users से Reset password करें।',
+      'auth/user-not-found': 'यह ईमेल Firebase Authentication → Users में नहीं मिला। सही ईमेल वाला अकाउंट बनाएँ।',
+      'auth/invalid-email': 'ईमेल का फॉर्मेट सही नहीं है।',
+      'auth/too-many-requests': 'कई बार गलत कोशिश हुई है। थोड़ी देर बाद फिर कोशिश करें।',
+      'auth/unauthorized-domain': 'इस वेबसाइट का domain Firebase में अनुमति प्राप्त नहीं है। Authentication → Settings → Authorized domains में indiaupdate1996-droid.github.io जोड़ें (स्पेस/अक्षर बिल्कुल सही रखें)।',
+      'auth/network-request-failed': 'इंटरनेट कनेक्शन या ब्राउज़र नेटवर्क में समस्या है। कनेक्शन जाँचकर पेज Refresh करें।'
+    };
+    alert(messages[err.code] || ('लॉगिन विफल: ' + (err.code || 'अज्ञात त्रुटि') + '\n' + (err.message || 'Firebase Authentication जाँचें।')));
   }
 };
 
@@ -272,13 +279,16 @@ onAuthStateChanged(auth, async user => {
         document.getElementById('adminStatus').textContent = 'लॉगिन सफल। प्रकाशित खबरें सभी पाठकों को दिखेंगी।';
       } else {
         document.getElementById('adminStatus').textContent =
-          'इस अकाउंट को एडमिन अनुमति नहीं मिली है। Firebase Console में admins/' + user.uid + ' दस्तावेज़ में role = admin होना चाहिए।';
+          'इस लॉगिन UID को admins सूची में admin अनुमति नहीं मिली। Firebase Console में admins/' + user.uid + ' दस्तावेज़ और role = admin जाँचें।';
         document.getElementById('adminForm').classList.add('hidden');
         document.getElementById('loginForm').classList.remove('hidden');
       }
     } catch (err) {
-      console.error(err);
-      document.getElementById('adminStatus').textContent = 'एडमिन अनुमति जाँच नहीं सकी। Firestore Rules और इंटरनेट कनेक्शन जाँचें।';
+      console.error('Admin permission lookup failed:', err.code, err.message);
+      document.getElementById('adminStatus').textContent =
+        'एडमिन अनुमति जाँच विफल (' + (err.code || 'unknown') + ')। Firestore Rules में admins दस्तावेज़ पढ़ने की अनुमति जाँचें।';
+      document.getElementById('adminForm').classList.add('hidden');
+      document.getElementById('loginForm').classList.remove('hidden');
     }
   }
 
@@ -296,12 +306,11 @@ onAuthStateChanged(auth, async user => {
           date:x.createdAt?.toDate ? x.createdAt.toDate().toLocaleString('hi-IN') : (x.date || 'नई खबर'),
           title:x.title || '',
           summary:x.summary || '',
-          body:x.body || x.content || '',
+          body:x.body || '',
           color:x.color || 'custom',
           externalUrl:x.externalUrl || '',
           source:x.source || '',
-          imageUrl:x.imageUrl || '',
-          imagePath:x.imagePath || ''
+          imageUrl:x.imageUrl || ''
         };
       });
 
@@ -327,7 +336,7 @@ document.getElementById('publishNews').onclick = async () => {
   const category = document.getElementById('newsCategory').value;
   const summary = document.getElementById('newsSummary').value.trim();
   const body = document.getElementById('newsBody').value.trim();
-  const imageFile = document.getElementById('newsImage').files[0] || null;
+  const imageFile = document.getElementById('newsImage').files[0];
 
   if (!title || !summary || !body) {
     alert('शीर्षक, विवरण और पूरी खबर भरें।');
@@ -336,15 +345,16 @@ document.getElementById('publishNews').onclick = async () => {
 
   try {
     let imageUrl = '';
-    let imagePath = '';
     if (imageFile) {
-      if (!imageFile.type.startsWith('image/')) throw new Error('कृपया JPG, PNG या WebP फोटो चुनें।');
-      if (imageFile.size > 5 * 1024 * 1024) throw new Error('फोटो 5 MB से छोटी होनी चाहिए।');
-      const safeName = imageFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-      imagePath = `news/${auth.currentUser.uid}/${Date.now()}-${safeName}`;
-      const uploaded = await uploadBytes(storageRef(storage, imagePath), imageFile, { contentType: imageFile.type });
-      imageUrl = await getDownloadURL(uploaded.ref);
+      const formData = new FormData();
+      formData.append('file', imageFile);
+      formData.append('upload_preset', 'india_update_news');
+      const uploadResponse = await fetch('https://api.cloudinary.com/v1_1/rkfting/image/upload', { method:'POST', body:formData });
+      const uploadResult = await uploadResponse.json();
+      if (!uploadResponse.ok || !uploadResult.secure_url) throw new Error(uploadResult.error?.message || 'Cloudinary upload failed');
+      imageUrl = uploadResult.secure_url;
     }
+
     await addDoc(collection(db, 'news'), {
       title,
       category,
@@ -353,19 +363,19 @@ document.getElementById('publishNews').onclick = async () => {
       emoji:categoryEmoji[category] || '📰',
       color:'custom',
       source:'admin',
-      imageUrl,
-      imagePath,
       createdAt:serverTimestamp(),
-      externalUrl:''
+      externalUrl:'',
+      imageUrl
     });
 
     document.getElementById('newsTitle').value = '';
+    document.getElementById('newsImage').value = '';
     document.getElementById('newsSummary').value = '';
     document.getElementById('newsBody').value = '';
     document.getElementById('adminStatus').textContent = 'खबर ऑनलाइन प्रकाशित हो गई। सभी पाठकों के पेज पर अपडेट आएगा।';
   } catch (err) {
     console.error(err);
-    alert(err.message || 'खबर प्रकाशित नहीं हुई। Firebase Storage चालू है और Storage Rules प्रकाशित हैं, यह जाँचें।');
+    alert('खबर प्रकाशित नहीं हुई: ' + (err.message || 'Firestore/Cloudinary सेटिंग जाँचें।'));
   }
 };
 
@@ -377,26 +387,11 @@ document.getElementById('adminNewsList').addEventListener('click', async e => {
   if (!confirm('क्या आप इस खबर को सभी पाठकों के लिए हटाना चाहते हैं?')) return;
 
   try {
-    const article = cloudArticles.find(a => a.id === b.dataset.deleteNews);
     await deleteDoc(doc(db, 'news', b.dataset.deleteNews));
-    if (article?.imagePath) {
-      try { await deleteObject(storageRef(storage, article.imagePath)); } catch (storageErr) { console.warn('फोटो हटाने में समस्या:', storageErr); }
-    }
   } catch (err) {
     console.error(err);
     alert('खबर नहीं हट सकी। Firebase Rules जाँचें।');
   }
-});
-
-const newsImageInput = document.getElementById('newsImage');
-newsImageInput.addEventListener('change', () => {
-  const file = newsImageInput.files[0];
-  const preview = document.getElementById('imagePreview');
-  if (!file) { preview.classList.add('hidden'); preview.removeAttribute('src'); return; }
-  if (!file.type.startsWith('image/')) { alert('कृपया फोटो फ़ाइल चुनें।'); newsImageInput.value = ''; preview.classList.add('hidden'); return; }
-  if (file.size > 5 * 1024 * 1024) { alert('फोटो 5 MB से छोटी होनी चाहिए।'); newsImageInput.value = ''; preview.classList.add('hidden'); return; }
-  preview.src = URL.createObjectURL(file);
-  preview.classList.remove('hidden');
 });
 
 document.getElementById('exportNews').onclick = () => {
