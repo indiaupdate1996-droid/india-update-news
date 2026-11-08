@@ -1,7 +1,6 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
 import { getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, getDoc } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
-import { getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-storage.js';
 
 // Firebase web config
 const firebaseConfig = {
@@ -17,7 +16,6 @@ const firebaseConfig = {
 const firebaseApp = initializeApp(firebaseConfig);
 const auth = getAuth(firebaseApp);
 const db = getFirestore(firebaseApp);
-const storage = getStorage(firebaseApp);
 
 const articles = [
  {id:'demo-1',category:'राजस्थान',emoji:'🌦️',date:'डेमो खबर',title:'राजस्थान मौसम अपडेट: अपने जिले का ताज़ा पूर्वानुमान देखें',summary:'मौसम से जुड़ी खबर प्रकाशित करने से पहले IMD और स्थानीय प्रशासन की आधिकारिक जानकारी की पुष्टि करें।',body:'यह नमूना लेख है, वास्तविक मौसम बुलेटिन नहीं। अपनी खबर प्रकाशित करते समय तारीख, प्रभावित जिले, चेतावनी का स्तर और मौसम विभाग का आधिकारिक स्रोत अवश्य जोड़ें।',color:'weather',demo:true},
@@ -336,15 +334,40 @@ document.getElementById('publishNews').onclick = async () => {
 
   try {
     let imageUrl = '';
-    let imagePath = '';
+
     if (imageFile) {
-      if (!imageFile.type.startsWith('image/')) throw new Error('कृपया JPG, PNG या WebP फोटो चुनें।');
-      if (imageFile.size > 5 * 1024 * 1024) throw new Error('फोटो 5 MB से छोटी होनी चाहिए।');
-      const safeName = imageFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-      imagePath = `news/${auth.currentUser.uid}/${Date.now()}-${safeName}`;
-      const uploaded = await uploadBytes(storageRef(storage, imagePath), imageFile, { contentType: imageFile.type });
-      imageUrl = await getDownloadURL(uploaded.ref);
+      if (!imageFile.type.startsWith('image/')) {
+        throw new Error('कृपया JPG, PNG या WebP फोटो चुनें।');
+      }
+
+      if (imageFile.size > 5 * 1024 * 1024) {
+        throw new Error('फोटो 5 MB से छोटी होनी चाहिए।');
+      }
+
+      // Cloudinary unsigned image upload
+      const formData = new FormData();
+      formData.append('file', imageFile);
+      formData.append('upload_preset', 'india_update_news');
+
+      const uploadResponse = await fetch(
+        'https://api.cloudinary.com/v1_1/rkfting/image/upload',
+        {
+          method: 'POST',
+          body: formData
+        }
+      );
+
+      const uploadResult = await uploadResponse.json();
+
+      if (!uploadResponse.ok || !uploadResult.secure_url) {
+        throw new Error(
+          uploadResult.error?.message || 'Cloudinary फोटो अपलोड नहीं हुई।'
+        );
+      }
+
+      imageUrl = uploadResult.secure_url;
     }
+
     await addDoc(collection(db, 'news'), {
       title,
       category,
@@ -354,7 +377,6 @@ document.getElementById('publishNews').onclick = async () => {
       color:'custom',
       source:'admin',
       imageUrl,
-      imagePath,
       createdAt:serverTimestamp(),
       externalUrl:''
     });
@@ -362,14 +384,17 @@ document.getElementById('publishNews').onclick = async () => {
     document.getElementById('newsTitle').value = '';
     document.getElementById('newsSummary').value = '';
     document.getElementById('newsBody').value = '';
-    document.getElementById('adminStatus').textContent = 'खबर ऑनलाइन प्रकाशित हो गई। सभी पाठकों के पेज पर अपडेट आएगा।';
+
+    document.getElementById('adminStatus').textContent =
+      'खबर ऑनलाइन प्रकाशित हो गई। सभी पाठकों के पेज पर अपडेट आएगा।';
+
   } catch (err) {
     console.error(err);
-    alert(err.message || 'खबर प्रकाशित नहीं हुई। Firebase Storage चालू है और Storage Rules प्रकाशित हैं, यह जाँचें।');
+    alert(err.message || 'खबर प्रकाशित नहीं हुई। Firebase Firestore Rules और इंटरनेट कनेक्शन जाँचें।');
   }
 };
 
-// FIXED: admin news delete handler syntax
+// Admin news delete handler
 document.getElementById('adminNewsList').addEventListener('click', async e => {
   const b = e.target.closest('[data-delete-news]');
   if (!b || !isAdmin) return;
@@ -377,30 +402,50 @@ document.getElementById('adminNewsList').addEventListener('click', async e => {
   if (!confirm('क्या आप इस खबर को सभी पाठकों के लिए हटाना चाहते हैं?')) return;
 
   try {
-    const article = cloudArticles.find(a => a.id === b.dataset.deleteNews);
     await deleteDoc(doc(db, 'news', b.dataset.deleteNews));
-    if (article?.imagePath) {
-      try { await deleteObject(storageRef(storage, article.imagePath)); } catch (storageErr) { console.warn('फोटो हटाने में समस्या:', storageErr); }
-    }
   } catch (err) {
     console.error(err);
     alert('खबर नहीं हट सकी। Firebase Rules जाँचें।');
   }
 });
 
+// Image preview
 const newsImageInput = document.getElementById('newsImage');
+
 newsImageInput.addEventListener('change', () => {
   const file = newsImageInput.files[0];
   const preview = document.getElementById('imagePreview');
-  if (!file) { preview.classList.add('hidden'); preview.removeAttribute('src'); return; }
-  if (!file.type.startsWith('image/')) { alert('कृपया फोटो फ़ाइल चुनें।'); newsImageInput.value = ''; preview.classList.add('hidden'); return; }
-  if (file.size > 5 * 1024 * 1024) { alert('फोटो 5 MB से छोटी होनी चाहिए।'); newsImageInput.value = ''; preview.classList.add('hidden'); return; }
+
+  if (!file) {
+    preview.classList.add('hidden');
+    preview.removeAttribute('src');
+    return;
+  }
+
+  if (!file.type.startsWith('image/')) {
+    alert('कृपया फोटो फ़ाइल चुनें।');
+    newsImageInput.value = '';
+    preview.classList.add('hidden');
+    return;
+  }
+
+  if (file.size > 5 * 1024 * 1024) {
+    alert('फोटो 5 MB से छोटी होनी चाहिए।');
+    newsImageInput.value = '';
+    preview.classList.add('hidden');
+    return;
+  }
+
   preview.src = URL.createObjectURL(file);
   preview.classList.remove('hidden');
 });
 
+// Export news backup
 document.getElementById('exportNews').onclick = () => {
-  const blob = new Blob([JSON.stringify(cloudArticles, null, 2)], {type:'application/json'});
+  const blob = new Blob([JSON.stringify(cloudArticles, null, 2)], {
+    type:'application/json'
+  });
+
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = 'india-update-news-backup.json';
@@ -408,6 +453,7 @@ document.getElementById('exportNews').onclick = () => {
   URL.revokeObjectURL(a.href);
 };
 
+// Automatic RSS news
 document.getElementById('autoNewsBtn').onclick = async () => {
   const btn = document.getElementById('autoNewsBtn');
   const notice = document.getElementById('newsNotice');
@@ -418,11 +464,13 @@ document.getElementById('autoNewsBtn').onclick = async () => {
   try {
     const feed = 'https://news.google.com/rss?hl=hi&gl=IN&ceid=IN:hi';
     const url = 'https://api.rss2json.com/v1/api.json?rss_url=' + encodeURIComponent(feed);
+
     const res = await fetch(url);
 
     if (!res.ok) throw new Error('service');
 
     const data = await res.json();
+
     if (!data.items || !data.items.length) throw new Error('empty');
 
     let added = 0;
@@ -453,9 +501,11 @@ document.getElementById('autoNewsBtn').onclick = async () => {
     notice.innerHTML = isAdmin
       ? '<span>✓</span> ' + added + ' RSS सुर्खियाँ ऑनलाइन जोड़ी गईं। ये केवल शीर्षक हैं; स्रोत खोलकर पुष्टि करें.'
       : '<span>!</span> RSS से सुर्खियाँ मिलीं, लेकिन ऑनलाइन प्रकाशित करने के लिए एडमिन लॉगिन करें।';
+
   } catch (e) {
     console.error(e);
     notice.innerHTML = '<span>!</span> स्वचालित RSS अभी नहीं चला। इंटरनेट या RSS सेवा में समस्या हो सकती है।';
+
   } finally {
     btn.disabled = false;
   }
