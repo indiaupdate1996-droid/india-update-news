@@ -1,5 +1,5 @@
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, sendPasswordResetEmail, signOut } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
 import { getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp, getDoc } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 
 // Firebase web config
@@ -240,7 +240,7 @@ document.getElementById('year').textContent = new Date().getFullYear();
 document.getElementById('adminOpen').onclick = () => adminDialog.showModal();
 document.getElementById('adminClose').onclick = () => adminDialog.close();
 
-// Admin login with clear Firebase error messages document.getElementById('adminLogin').onclick = async () => {   const email = document.getElementById('adminEmail').value.trim();   const password = document.getElementById('adminPassword').value;    if (!email || !password) {     alert('कृपया ईमेल और पासवर्ड भरें।');     return;   }    try {     await signInWithEmailAndPassword(auth, email, password);   } catch (err) {     console.error('Admin login error:', err);      const messages = {       'auth/invalid-email': 'ईमेल का फॉर्मेट सही नहीं है।',       'auth/user-not-found': 'इस ईमेल से कोई अकाउंट नहीं मिला।',       'auth/wrong-password': 'पासवर्ड गलत है।',       'auth/invalid-credential': 'ईमेल या पासवर्ड गलत है।',       'auth/too-many-requests': 'बहुत बार कोशिश हुई है। थोड़ी देर बाद प्रयास करें।',       'auth/network-request-failed': 'इंटरनेट कनेक्शन जाँचें।',       'auth/operation-not-allowed': 'Firebase में Email/Password लॉगिन चालू नहीं है।'     };      alert(messages[err.code] || 'लॉगिन नहीं हुआ। Firebase Authentication सेटिंग जाँचें।');   } };  // Forgot password button (automatically added to login form) const loginForm = document.getElementById('loginForm'); const forgotBtn = document.createElement('button');  forgotBtn.type = 'button'; forgotBtn.id = 'adminForgotPassword'; forgotBtn.textContent = 'पासवर्ड भूल गए?'; forgotBtn.className = 'read-btn'; forgotBtn.style.marginTop = '10px';  loginForm.appendChild(forgotBtn);  forgotBtn.onclick = async () => {   const email = document.getElementById('adminEmail').value.trim();    if (!email) {     alert('पहले अपना एडमिन ईमेल भरें।');     document.getElementById('adminEmail').focus();     return;   }    try {     await sendPasswordResetEmail(auth, email);     alert('पासवर्ड रीसेट करने का लिंक आपके ईमेल पर भेज दिया गया है।');   } catch (err) {     console.error('Password reset error:', err);      const messages = {       'auth/invalid-email': 'ईमेल का फॉर्मेट सही नहीं है।',       'auth/user-not-found': 'इस ईमेल से कोई अकाउंट नहीं मिला।',       'auth/too-many-requests': 'बहुत बार कोशिश हुई है। थोड़ी देर बाद प्रयास करें।',       'auth/network-request-failed': 'इंटरनेट कनेक्शन जाँचें।'     };      alert(messages[err.code] || 'पासवर्ड रीसेट ईमेल नहीं भेजा जा सका। Firebase सेटिंग जाँचें।');   } };
+document.getElementById('adminLogin').onclick = async () => {
   const email = document.getElementById('adminEmail').value.trim();
   const password = document.getElementById('adminPassword').value;
 
@@ -251,7 +251,7 @@ document.getElementById('adminClose').onclick = () => adminDialog.close();
     console.error(err);
   }
 };
-document.getElementById('adminLogout').onclick = () => signOut(auth);
+
 document.getElementById('adminLogout').onclick = () => signOut(auth);
 
 onAuthStateChanged(auth, async user => {
@@ -270,13 +270,13 @@ onAuthStateChanged(auth, async user => {
         document.getElementById('adminStatus').textContent = 'लॉगिन सफल। प्रकाशित खबरें सभी पाठकों को दिखेंगी।';
       } else {
         document.getElementById('adminStatus').textContent =
-          'यह अकाउंट एडमिन सूची में नहीं है। Firebase Console में admins/' + user.uid + ' दस्तावेज़ जोड़ें, role = admin रखें।';
-        document.getElementById('adminForm').classList.remove('hidden');
-        document.getElementById('loginForm').classList.add('hidden');
+          'इस अकाउंट को एडमिन अनुमति नहीं मिली है। Firebase Console में admins/' + user.uid + ' दस्तावेज़ में role = admin होना चाहिए।';
+        document.getElementById('adminForm').classList.add('hidden');
+        document.getElementById('loginForm').classList.remove('hidden');
       }
     } catch (err) {
       console.error(err);
-      alert('एडमिन अनुमति जाँच नहीं सकी। Firestore Rules और सेटअप जाँचें।');
+      document.getElementById('adminStatus').textContent = 'एडमिन अनुमति जाँच नहीं सकी। Firestore Rules और इंटरनेट कनेक्शन जाँचें।';
     }
   }
 
@@ -294,7 +294,7 @@ onAuthStateChanged(auth, async user => {
           date:x.createdAt?.toDate ? x.createdAt.toDate().toLocaleString('hi-IN') : (x.date || 'नई खबर'),
           title:x.title || '',
           summary:x.summary || '',
-          body:x.body || '',
+          body:x.body || x.content || '',
           color:x.color || 'custom',
           externalUrl:x.externalUrl || '',
           source:x.source || ''
