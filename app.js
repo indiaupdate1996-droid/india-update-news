@@ -247,7 +247,7 @@ document.getElementById('adminLogin').onclick = async () => {
   try {
     await signInWithEmailAndPassword(auth, email, password);
   } catch (err) {
-    alert('लॉगिन नहीं हुआ। ईमेल/पासवर्ड और Firebase Authentication सेटिंग जाँचें।');
+    alert('Login Error: ' + err.code + ' — ' + err.message);
     console.error(err);
   }
 };
