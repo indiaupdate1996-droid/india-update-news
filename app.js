@@ -346,7 +346,7 @@ document.getElementById('publishNews').onclick = async () => {
       formData.append('upload_preset', 'india_update_news');
 
       const uploadResponse = await fetch(
-        'https://api.cloudinary.com/v1_1/rkfting/image/upload',
+        'https://api.cloudinary.com/v1_1/rkftintg/image/upload',
         { method: 'POST', body: formData }
       );
       let uploadResult;
