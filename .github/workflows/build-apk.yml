@@ -52,6 +52,11 @@ jobs:
           npx cap add android
           npx cap sync android
 
+      - name: Optimize Gradle download
+        run: |
+          sed -i 's/-all.zip/-bin.zip/' android/gradle/wrapper/gradle-wrapper.properties
+          echo 'networkTimeout=600000' >> android/gradle/wrapper/gradle-wrapper.properties
+
       - name: Build APK
         run: |
           cd android
