@@ -64,6 +64,49 @@ dialog#articleDialog::backdrop {
     font-size: 17px !important;
   }
 }
+  /* India Update - Mobile full news fix */
+#articleDialog {
+  width: 95%;
+  max-width: 900px;
+  max-height: 95vh;
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+
+#articleContent {
+  max-height: none;
+  overflow: visible;
+}
+
+#articleDialog img {
+  max-width: 100%;
+  height: auto;
+}
+
+@media (max-width: 600px) {
+  #articleDialog {
+    width: 96%;
+    max-width: 96%;
+    max-height: 92vh;
+    margin: auto;
+    padding: 12px;
+    overflow-y: auto;
+    border-radius: 16px;
+  }
+
+  #articleContent {
+    padding: 12px;
+  }
+
+  #articleContent .article-title {
+    font-size: 24px;
+  }
+
+  #articleContent .article-text {
+    font-size: 17px;
+    line-height: 1.8;
+  }
+}
 </style>
 <title>India Update | हिंदी न्यूज़</title>
 </head>
