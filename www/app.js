@@ -442,7 +442,7 @@ document.getElementById('autoNewsBtn').onclick = async () => {
 
     let added = 0;
 
-    const seenTitles = new Set(allArticles().map(a => (a.title || '').trim().toLocaleLowerCase('hi'));
+    const seenTitles = new Set(allArticles().map(a => (a.title || '').trim().toLocaleLowerCase('hi')));
 
     for (const it of data.items.slice(0, 12)) {
       const title = (it.title || '').replace(/\s-\s[^-]+$/, '').trim();
