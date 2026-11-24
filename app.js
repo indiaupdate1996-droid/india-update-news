@@ -441,32 +441,50 @@ document.getElementById('autoNewsBtn').onclick = async () => {
 
     let added = 0;
 
+    const seenTitles = new Set(allArticles().map(a => (a.title || '').trim().toLowerCase()));
     for (const it of data.items.slice(0, 12)) {
-      let extracted = { imageUrl: '', articleText: '' };
-const rssImage = it.thumbnail || it.enclosure?.link || it.enclosure?.url || '';
-const workerUrl = 'https://round-grass-939e.indiaupdate1996.workers.dev/';
       const title = (it.title || '').replace(/\s-\s[^-]+$/, '').trim();
+      if (!title || seenTitles.has(title.toLowerCase())) continue;
+      seenTitles.add(title.toLowerCase());
 
-      if (!title || allArticles().some(a => a.title === title)) continue;
-try {
-  const response = await fetch(workerUrl + '?url=' + encodeURIComponent(it.link));
-  if (response.ok) extracted = await response.json();
-} catch (e) {
-  console.log('Article extraction failed', e);
-}
+      // RSS descriptions may contain an image HTML tag; use it as a fallback.
+      const rssHtml = [it.content, it.description, it.contentSnippet].filter(Boolean).join(' ');
+      const rssImgMatch = rssHtml.match(/<img[^>]+src=["']([^"']+)["']/i);
+      const rssImage = it.thumbnail || it.enclosure?.link || it.enclosure?.url || rssImgMatch?.[1] || '';
+      let extracted = { imageUrl: '', articleText: '' };
+      const workerUrl = 'https://round-grass-939e.indiaupdate1996.workers.dev/';
+      try {
+        if (it.link) {
+          const response = await fetch(workerUrl + '?url=' + encodeURIComponent(it.link));
+          if (response.ok) {
+            const result = await response.json();
+            if (result && typeof result === 'object') extracted = result;
+          }
+        }
+      } catch (e) {
+        console.log('Article extraction failed', e);
+      }
+
+      // Use the RSS description if full article extraction is blocked/unavailable.
+      const rssDescription = (it.description || it.content || '')
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/&nbsp;|&#160;/gi, ' ')
+        .replace(/&amp;/gi, '&')
+        .replace(/&quot;/gi, '"')
+        .replace(/&#39;/gi, "'")
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>')
+        .replace(/\s+/g, ' ').trim();
+      const articleText = (extracted.articleText || '').trim();
+      const imageUrl = extracted.imageUrl || rssImage || '';
+      const summaryText = articleText || rssDescription || 'Google News से प्राप्त खबर';
       const item = {
         title,
         category:'देश',
-       summary: extracted.articleText
-  ? extracted.articleText.substring(0, 250)
-  : 'Google News से प्राप्त खबर',
-
-body: extracted.articleText
-  || 'पूरी खबर उपलब्ध नहीं हो सकी। मूल स्रोत देखें।',
-
-externalUrl: it.link || '',
-
-imageUrl: extracted.imageUrl || rssImage || '',
+        summary: summaryText.substring(0, 250),
+        body: articleText || rssDescription || 'पूरी खबर उपलब्ध नहीं हो सकी। मूल स्रोत देखें।',
+        externalUrl: it.link || '',
+        imageUrl,
         createdAt:serverTimestamp()
       };
 
