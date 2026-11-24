@@ -442,18 +442,31 @@ document.getElementById('autoNewsBtn').onclick = async () => {
     let added = 0;
 
     for (const it of data.items.slice(0, 12)) {
+      let extracted = { imageUrl: '', articleText: '' };
+const rssImage = it.thumbnail || it.enclosure?.link || it.enclosure?.url || '';
+const workerUrl = 'https://round-grass-939e.indiaupdate1996.workers.dev/';
       const title = (it.title || '').replace(/\s-\s[^-]+$/, '').trim();
 
       if (!title || allArticles().some(a => a.title === title)) continue;
-
+try {
+  const response = await fetch(workerUrl + '?url=' + encodeURIComponent(it.link));
+  if (response.ok) extracted = await response.json();
+} catch (e) {
+  console.log('Article extraction failed', e);
+}
       const item = {
         title,
         category:'देश',
-        summary:'यह शीर्षक Google News RSS से प्राप्त हुआ है। पूरी खबर पढ़ने और पुष्टि के लिए मूल स्रोत खोलें।',
-        body:'स्वचालित RSS सुर्खी। इस ऐप में पूरी खबर का लेख नहीं आया है। स्रोत लिंक: ' + (it.link || ''),
-        externalUrl:it.link || '',
-        imageUrl: it.thumbnail || it.enclosure?.link || it.enclosure?.url || ((it.content || it.description || '').match(/<img[^>]+src=["']([^"']+)["']/i) || [])[1] || '',
-        source:'rss',
+       summary: extracted.articleText
+  ? extracted.articleText.substring(0, 250)
+  : 'Google News से प्राप्त खबर',
+
+body: extracted.articleText
+  || 'पूरी खबर उपलब्ध नहीं हो सकी। मूल स्रोत देखें।',
+
+externalUrl: it.link || '',
+
+imageUrl: extracted.imageUrl || rssImage || '',
         createdAt:serverTimestamp()
       };
 
