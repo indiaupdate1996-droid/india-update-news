@@ -453,62 +453,75 @@ document.getElementById('exportNews').onclick = () => {
   URL.revokeObjectURL(a.href);
 };
 
-// Automatic RSS news
-document.getElementById('autoNewsBtn').onclick = async () => {
+// Automatic RSS news — image/description fallbacks, duplicate prevention
+ document.getElementById('autoNewsBtn').onclick = async () => {
   const btn = document.getElementById('autoNewsBtn');
   const notice = document.getElementById('newsNotice');
-
   btn.disabled = true;
-  notice.innerHTML = '<span>↻</span> RSS से सुर्खियाँ लाने की कोशिश हो रही है…';
-
+  notice.innerHTML = '<span>↻</span> RSS से खबरें लाने की कोशिश हो रही है…';
   try {
     const feed = 'https://news.google.com/rss?hl=hi&gl=IN&ceid=IN:hi';
     const url = 'https://api.rss2json.com/v1/api.json?rss_url=' + encodeURIComponent(feed);
-
     const res = await fetch(url);
-
-    if (!res.ok) throw new Error('service');
-
+    if (!res.ok) throw new Error('RSS service');
     const data = await res.json();
+    if (!data.items || !data.items.length) throw new Error('RSS empty');
 
-    if (!data.items || !data.items.length) throw new Error('empty');
-
+    const knownTitles = new Set(allArticles().map(a => (a.title || '').trim().toLowerCase()));
     let added = 0;
-
     for (const it of data.items.slice(0, 12)) {
       const title = (it.title || '').replace(/\s-\s[^-]+$/, '').trim();
+      const key = title.toLowerCase();
+      if (!title || knownTitles.has(key)) continue;
+      knownTitles.add(key);
 
-      if (!title || allArticles().some(a => a.title === title)) continue;
+      const rawHtml = it.content || it.description || it.contentSnippet || '';
+      const plain = String(rawHtml).replace(/<script[\s\S]*?<\/script>/gi, '')
+        .replace(/<style[\s\S]*?<\/style>/gi, '')
+        .replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ')
+        .replace(/&amp;/gi, '&').replace(/&quot;/gi, '"')
+        .replace(/&#39;/gi, "'").replace(/\s+/g, ' ').trim();
+      const imgMatch = String(rawHtml).match(/<img[^>]+src=["']([^"']+)["']/i);
+      const imageUrl = it.thumbnail || it.enclosure?.link || it.enclosure?.url || imgMatch?.[1] || '';
+      const sourceLink = it.link || '';
 
+      let fullText = '';
+      // Optional article-text extraction through the existing Cloudflare Worker; fall back to RSS text.
+      if (sourceLink) {
+        try {
+          const workerResp = await fetch('https://round-grass-939e.indiaupdate1996.workers.dev/?url=' + encodeURIComponent(sourceLink));
+          if (workerResp.ok) {
+            const extracted = await workerResp.json();
+            fullText = extracted.articleText || extracted.text || extracted.content || extracted.body || '';
+            if (typeof fullText !== 'string') fullText = '';
+          }
+        } catch (workerError) { console.warn('Article extraction fallback:', workerError); }
+      }
+      const articleText = fullText.trim() || plain;
       const item = {
         title,
-        category:'देश',
-        summary:'यह शीर्षक Google News RSS से प्राप्त हुआ है। पूरी खबर पढ़ने और पुष्टि के लिए मूल स्रोत खोलें।',
-        body:'स्वचालित RSS सुर्खी। इस ऐप में पूरी खबर का लेख नहीं आया है। स्रोत लिंक: ' + (it.link || ''),
-        externalUrl:it.link || '',
-        source:'rss',
-        createdAt:serverTimestamp()
+        category: 'देश',
+        summary: (articleText || 'RSS से प्राप्त खबर। मूल स्रोत पर पढ़ें।').slice(0, 280),
+        body: articleText || 'इस खबर का विवरण RSS में उपलब्ध नहीं है। मूल स्रोत खोलकर पूरी खबर पढ़ें।',
+        externalUrl: sourceLink,
+        source: 'rss',
+        imageUrl,
+        createdAt: serverTimestamp()
       };
-
       if (isAdmin) {
         await addDoc(collection(db, 'news'), item);
         added++;
       }
     }
-
     render();
-
     notice.innerHTML = isAdmin
-      ? '<span>✓</span> ' + added + ' RSS सुर्खियाँ ऑनलाइन जोड़ी गईं। ये केवल शीर्षक हैं; स्रोत खोलकर पुष्टि करें.'
-      : '<span>!</span> RSS से सुर्खियाँ मिलीं, लेकिन ऑनलाइन प्रकाशित करने के लिए एडमिन लॉगिन करें।';
-
+      ? '<span>✓</span> ' + added + ' नई RSS खबरें जोड़ी गईं। फोटो/विवरण स्रोत के अनुसार उपलब्ध होंगे; पूरी खबर के लिए मूल स्रोत देखें।'
+      : '<span>!</span> RSS खबरें मिलीं, लेकिन ऑनलाइन प्रकाशित करने के लिए एडमिन लॉगिन करें।';
   } catch (e) {
     console.error(e);
-    notice.innerHTML = '<span>!</span> स्वचालित RSS अभी नहीं चला। इंटरनेट या RSS सेवा में समस्या हो सकती है।';
-
+    notice.innerHTML = '<span>!</span> RSS अभी नहीं चला। इंटरनेट या RSS सेवा की समस्या हो सकती है।';
   } finally {
     btn.disabled = false;
   }
 };
-
 render();
