@@ -75,7 +75,7 @@ function render() {
   );
 
   grid.innerHTML = list.map(a => `
-    <article class="news-card">
+    <article class="news-card" data-open="${safeText(a.id)}" tabindex="0" role="button" aria-label="खबर खोलें: ${safeText(a.title)}">
       <div class="thumb ${safeText(a.color || 'custom')}">
         <span class="tag">${safeText(a.category)}</span>
         ${a.imageUrl ? `<img class="news-photo" src="${safeText(a.imageUrl)}" alt="${safeText(a.title)}" loading="lazy">` : `<span class="emoji">${safeText(a.emoji || '📰')}</span>`}
@@ -153,6 +153,7 @@ grid.addEventListener('click', async e => {
   const read = e.target.closest('[data-read]');
   const save = e.target.closest('[data-save]');
   const share = e.target.closest('[data-share]');
+  const cardOpen = e.target.closest('[data-open]');
 
   if (save) {
     const id = save.dataset.save;
@@ -161,8 +162,10 @@ grid.addEventListener('click', async e => {
     render();
   }
 
-  if (read) {
-    const a = findArticle(read.dataset.read);
+  const cardClick = cardOpen && !e.target.closest('button, a, [data-save], [data-share], [data-read]');
+  if (read || cardClick) {
+    const articleId = read ? read.dataset.read : cardOpen.dataset.open;
+    const a = findArticle(articleId);
     if (!a) return;
 
     document.getElementById('articleContent').innerHTML = `
@@ -299,7 +302,6 @@ onAuthStateChanged(auth, async user => {
           externalUrl:x.externalUrl || '',
           source:x.source || '',
           imageUrl:x.imageUrl || '',
-          imagePath:x.imagePath || ''
         };
       });
 
@@ -334,40 +336,35 @@ document.getElementById('publishNews').onclick = async () => {
 
   try {
     let imageUrl = '';
-
     if (imageFile) {
       if (!imageFile.type.startsWith('image/')) {
         throw new Error('कृपया JPG, PNG या WebP फोटो चुनें।');
       }
-
       if (imageFile.size > 5 * 1024 * 1024) {
         throw new Error('फोटो 5 MB से छोटी होनी चाहिए।');
       }
 
-      // Cloudinary unsigned image upload
       const formData = new FormData();
       formData.append('file', imageFile);
       formData.append('upload_preset', 'india_update_news');
 
       const uploadResponse = await fetch(
-        'https://api.cloudinary.com/v1_1/rkfting/image/upload',
-        {
-          method: 'POST',
-          body: formData
-        }
+        'https://api.cloudinary.com/v1_1/rkftintg/image/upload',
+        { method: 'POST', body: formData }
       );
-
-      const uploadResult = await uploadResponse.json();
-
-      if (!uploadResponse.ok || !uploadResult.secure_url) {
-        throw new Error(
-          uploadResult.error?.message || 'Cloudinary फोटो अपलोड नहीं हुई।'
-        );
+      let uploadResult;
+      try {
+        uploadResult = await uploadResponse.json();
+      } catch {
+        throw new Error('Cloudinary से पढ़ने योग्य जवाब नहीं मिला। Upload Preset और Cloud Name जाँचें।');
       }
 
+      if (!uploadResponse.ok || !uploadResult.secure_url) {
+        const cloudinaryMessage = uploadResult?.error?.message || 'Unknown Cloudinary error';
+        throw new Error(`Cloudinary (${uploadResponse.status}): ${cloudinaryMessage}`);
+      }
       imageUrl = uploadResult.secure_url;
     }
-
     await addDoc(collection(db, 'news'), {
       title,
       category,
@@ -384,17 +381,14 @@ document.getElementById('publishNews').onclick = async () => {
     document.getElementById('newsTitle').value = '';
     document.getElementById('newsSummary').value = '';
     document.getElementById('newsBody').value = '';
-
-    document.getElementById('adminStatus').textContent =
-      'खबर ऑनलाइन प्रकाशित हो गई। सभी पाठकों के पेज पर अपडेट आएगा।';
-
+    document.getElementById('adminStatus').textContent = 'खबर ऑनलाइन प्रकाशित हो गई। सभी पाठकों के पेज पर अपडेट आएगा।';
   } catch (err) {
     console.error(err);
-    alert(err.message || 'खबर प्रकाशित नहीं हुई। Firebase Firestore Rules और इंटरनेट कनेक्शन जाँचें।');
+    alert(err.message || 'खबर प्रकाशित नहीं हुई। Firebase Storage चालू है और Storage Rules प्रकाशित हैं, यह जाँचें।');
   }
 };
 
-// Admin news delete handler
+// FIXED: admin news delete handler syntax
 document.getElementById('adminNewsList').addEventListener('click', async e => {
   const b = e.target.closest('[data-delete-news]');
   if (!b || !isAdmin) return;
@@ -409,43 +403,19 @@ document.getElementById('adminNewsList').addEventListener('click', async e => {
   }
 });
 
-// Image preview
 const newsImageInput = document.getElementById('newsImage');
-
 newsImageInput.addEventListener('change', () => {
   const file = newsImageInput.files[0];
   const preview = document.getElementById('imagePreview');
-
-  if (!file) {
-    preview.classList.add('hidden');
-    preview.removeAttribute('src');
-    return;
-  }
-
-  if (!file.type.startsWith('image/')) {
-    alert('कृपया फोटो फ़ाइल चुनें।');
-    newsImageInput.value = '';
-    preview.classList.add('hidden');
-    return;
-  }
-
-  if (file.size > 5 * 1024 * 1024) {
-    alert('फोटो 5 MB से छोटी होनी चाहिए।');
-    newsImageInput.value = '';
-    preview.classList.add('hidden');
-    return;
-  }
-
+  if (!file) { preview.classList.add('hidden'); preview.removeAttribute('src'); return; }
+  if (!file.type.startsWith('image/')) { alert('कृपया फोटो फ़ाइल चुनें।'); newsImageInput.value = ''; preview.classList.add('hidden'); return; }
+  if (file.size > 5 * 1024 * 1024) { alert('फोटो 5 MB से छोटी होनी चाहिए।'); newsImageInput.value = ''; preview.classList.add('hidden'); return; }
   preview.src = URL.createObjectURL(file);
   preview.classList.remove('hidden');
 });
 
-// Export news backup
 document.getElementById('exportNews').onclick = () => {
-  const blob = new Blob([JSON.stringify(cloudArticles, null, 2)], {
-    type:'application/json'
-  });
-
+  const blob = new Blob([JSON.stringify(cloudArticles, null, 2)], {type:'application/json'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = 'india-update-news-backup.json';
@@ -453,75 +423,84 @@ document.getElementById('exportNews').onclick = () => {
   URL.revokeObjectURL(a.href);
 };
 
-// Automatic RSS news — image/description fallbacks, duplicate prevention
- document.getElementById('autoNewsBtn').onclick = async () => {
+document.getElementById('autoNewsBtn').onclick = async () => {
   const btn = document.getElementById('autoNewsBtn');
   const notice = document.getElementById('newsNotice');
+
   btn.disabled = true;
-  notice.innerHTML = '<span>↻</span> RSS से खबरें लाने की कोशिश हो रही है…';
+  notice.innerHTML = '<span>↻</span> RSS से सुर्खियाँ लाने की कोशिश हो रही है…';
+
   try {
     const feed = 'https://news.google.com/rss?hl=hi&gl=IN&ceid=IN:hi';
     const url = 'https://api.rss2json.com/v1/api.json?rss_url=' + encodeURIComponent(feed);
     const res = await fetch(url);
-    if (!res.ok) throw new Error('RSS service');
-    const data = await res.json();
-    if (!data.items || !data.items.length) throw new Error('RSS empty');
 
-    const knownTitles = new Set(allArticles().map(a => (a.title || '').trim().toLowerCase()));
+    if (!res.ok) throw new Error('service');
+
+    const data = await res.json();
+    if (!data.items || !data.items.length) throw new Error('empty');
+
     let added = 0;
+
+    const seenTitles = new Set(allArticles().map(a => (a.title || '').trim().toLocaleLowerCase('hi'));
+
     for (const it of data.items.slice(0, 12)) {
       const title = (it.title || '').replace(/\s-\s[^-]+$/, '').trim();
-      const key = title.toLowerCase();
-      if (!title || knownTitles.has(key)) continue;
-      knownTitles.add(key);
+      const normalizedTitle = title.toLocaleLowerCase('hi');
+      if (!title || seenTitles.has(normalizedTitle)) continue;
+      seenTitles.add(normalizedTitle);
 
-      const rawHtml = it.content || it.description || it.contentSnippet || '';
-      const plain = String(rawHtml).replace(/<script[\s\S]*?<\/script>/gi, '')
-        .replace(/<style[\s\S]*?<\/style>/gi, '')
-        .replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ')
-        .replace(/&amp;/gi, '&').replace(/&quot;/gi, '"')
-        .replace(/&#39;/gi, "'").replace(/\s+/g, ' ').trim();
-      const imgMatch = String(rawHtml).match(/<img[^>]+src=["']([^"']+)["']/i);
-      const imageUrl = it.thumbnail || it.enclosure?.link || it.enclosure?.url || imgMatch?.[1] || '';
-      const sourceLink = it.link || '';
-
-      let fullText = '';
-      // Optional article-text extraction through the existing Cloudflare Worker; fall back to RSS text.
-      if (sourceLink) {
-        try {
-          const workerResp = await fetch('https://round-grass-939e.indiaupdate1996.workers.dev/?url=' + encodeURIComponent(sourceLink));
-          if (workerResp.ok) {
-            const extracted = await workerResp.json();
-            fullText = extracted.articleText || extracted.text || extracted.content || extracted.body || '';
-            if (typeof fullText !== 'string') fullText = '';
+      // RSS photos: use explicit thumbnail/enclosure, or extract first inline image.
+      const rssContent = it.content || it.description || it.contentSnippet || '';
+      const inlineImg = (rssContent.match(/<img[^>]+src=[\"']([^\"']+)[\"']/i) || [])[1] || '';
+      const rssImage = it.thumbnail || it.enclosure?.link || it.enclosure?.url || inlineImg || '';
+      let extracted = { imageUrl: '', articleText: '' };
+      const workerUrl = 'https://round-grass-939e.indiaupdate1996.workers.dev/';
+      try {
+        if (it.link) {
+          const response = await fetch(workerUrl + '?url=' + encodeURIComponent(it.link));
+          if (response.ok) {
+            const result = await response.json();
+            extracted = {
+              imageUrl: result.imageUrl || '',
+              articleText: (result.articleText || result.text || '').trim()
+            };
           }
-        } catch (workerError) { console.warn('Article extraction fallback:', workerError); }
+        }
+      } catch (e) {
+        console.log('Article extraction failed; RSS fallback used', e);
       }
-      const articleText = fullText.trim() || plain;
+
+      // RSS description is a fallback; do not claim it is the full article.
+      const cleanRss = rssContent.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&quot;/g, '\"').replace(/&#39;/g, "'").replace(/\s+/g, ' ').trim();
+      const articleText = extracted.articleText || cleanRss;
       const item = {
         title,
         category: 'देश',
-        summary: (articleText || 'RSS से प्राप्त खबर। मूल स्रोत पर पढ़ें।').slice(0, 280),
-        body: articleText || 'इस खबर का विवरण RSS में उपलब्ध नहीं है। मूल स्रोत खोलकर पूरी खबर पढ़ें।',
-        externalUrl: sourceLink,
-        source: 'rss',
-        imageUrl,
+        summary: articleText ? articleText.substring(0, 250) : 'Google News से प्राप्त खबर',
+        body: articleText || 'मूल स्रोत पर खबर पढ़ें।',
+        externalUrl: it.link || '',
+        imageUrl: extracted.imageUrl || rssImage || '',
         createdAt: serverTimestamp()
       };
+
       if (isAdmin) {
         await addDoc(collection(db, 'news'), item);
         added++;
       }
     }
+
     render();
+
     notice.innerHTML = isAdmin
-      ? '<span>✓</span> ' + added + ' नई RSS खबरें जोड़ी गईं। फोटो/विवरण स्रोत के अनुसार उपलब्ध होंगे; पूरी खबर के लिए मूल स्रोत देखें।'
-      : '<span>!</span> RSS खबरें मिलीं, लेकिन ऑनलाइन प्रकाशित करने के लिए एडमिन लॉगिन करें।';
+      ? '<span>✓</span> ' + added + ' RSS सुर्खियाँ ऑनलाइन जोड़ी गईं। ये केवल शीर्षक हैं; स्रोत खोलकर पुष्टि करें.'
+      : '<span>!</span> RSS से सुर्खियाँ मिलीं, लेकिन ऑनलाइन प्रकाशित करने के लिए एडमिन लॉगिन करें।';
   } catch (e) {
     console.error(e);
-    notice.innerHTML = '<span>!</span> RSS अभी नहीं चला। इंटरनेट या RSS सेवा की समस्या हो सकती है।';
+    notice.innerHTML = '<span>!</span> स्वचालित RSS अभी नहीं चला। इंटरनेट या RSS सेवा में समस्या हो सकती है।';
   } finally {
     btn.disabled = false;
   }
 };
+
 render();
