@@ -452,6 +452,7 @@ document.getElementById('autoNewsBtn').onclick = async () => {
         summary:'यह शीर्षक Google News RSS से प्राप्त हुआ है। पूरी खबर पढ़ने और पुष्टि के लिए मूल स्रोत खोलें।',
         body:'स्वचालित RSS सुर्खी। इस ऐप में पूरी खबर का लेख नहीं आया है। स्रोत लिंक: ' + (it.link || ''),
         externalUrl:it.link || '',
+        imageUrl: it.thumbnail || it.enclosure?.link || it.enclosure?.url || '',
         source:'rss',
         createdAt:serverTimestamp()
       };
