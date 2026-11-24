@@ -75,7 +75,7 @@ function render() {
   );
 
   grid.innerHTML = list.map(a => `
-    <article class="news-card">
+    <article class="news-card" data-open="${safeText(a.id)}" tabindex="0" role="button" aria-label="खबर खोलें: ${safeText(a.title)}">
       <div class="thumb ${safeText(a.color || 'custom')}">
         <span class="tag">${safeText(a.category)}</span>
         ${a.imageUrl ? `<img class="news-photo" src="${safeText(a.imageUrl)}" alt="${safeText(a.title)}" loading="lazy">` : `<span class="emoji">${safeText(a.emoji || '📰')}</span>`}
@@ -153,6 +153,7 @@ grid.addEventListener('click', async e => {
   const read = e.target.closest('[data-read]');
   const save = e.target.closest('[data-save]');
   const share = e.target.closest('[data-share]');
+  const cardOpen = e.target.closest('[data-open]');
 
   if (save) {
     const id = save.dataset.save;
@@ -161,8 +162,9 @@ grid.addEventListener('click', async e => {
     render();
   }
 
-  if (read) {
-    const a = findArticle(read.dataset.read);
+  if (read || (cardOpen && !save && !share)) {
+    const articleId = read ? read.dataset.read : cardOpen.dataset.open;
+    const a = findArticle(articleId);
     if (!a) return;
 
     document.getElementById('articleContent').innerHTML = `
@@ -346,7 +348,7 @@ document.getElementById('publishNews').onclick = async () => {
       formData.append('upload_preset', 'india_update_news');
 
       const uploadResponse = await fetch(
-        'https://api.cloudinary.com/v1_1/rkfting/image/upload',
+        'https://api.cloudinary.com/v1_1/rkftintg/image/upload',
         { method: 'POST', body: formData }
       );
       let uploadResult;
