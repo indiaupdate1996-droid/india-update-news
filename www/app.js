@@ -75,10 +75,10 @@ function render() {
   );
 
   grid.innerHTML = list.map(a => `
-    <article class="news-card" data-open="${safeText(a.id)}" tabindex="0" role="button" aria-label="खबर खोलें: ${safeText(a.title)}">
-      <div class="thumb ${safeText(a.color || 'custom')}">
+    <article class="news-card">
+      <div class="thumb ${safeText(a.color || 'custom')}" style="${a.imageUrl ? `background-image:linear-gradient(#0002,#0002),url('${safeText(a.imageUrl)}');background-size:cover;background-position:center` : ''}">
         <span class="tag">${safeText(a.category)}</span>
-        ${a.imageUrl ? `<img class="news-photo" src="${safeText(a.imageUrl)}" alt="${safeText(a.title)}" loading="lazy">` : `<span class="emoji">${safeText(a.emoji || '📰')}</span>`}
+        ${a.imageUrl ? '' : `<span class="emoji">${safeText(a.emoji || '📰')}</span>`}
       </div>
       <div class="card-body">
         <div class="card-meta">
@@ -153,7 +153,6 @@ grid.addEventListener('click', async e => {
   const read = e.target.closest('[data-read]');
   const save = e.target.closest('[data-save]');
   const share = e.target.closest('[data-share]');
-  const cardOpen = e.target.closest('[data-open]');
 
   if (save) {
     const id = save.dataset.save;
@@ -162,17 +161,16 @@ grid.addEventListener('click', async e => {
     render();
   }
 
-  const cardClick = !!cardOpen && !e.target.closest('button, a, [data-save], [data-share], [data-read]');
-  if (read || cardClick) {
-    const articleId = read ? read.dataset.read : cardOpen.dataset.open;
-    const a = findArticle(articleId);
+  if (read) {
+    const a = findArticle(read.dataset.read);
     if (!a) return;
 
     document.getElementById('articleContent').innerHTML = `
       <span class="eyebrow red">${safeText(a.category)} · ${safeText(a.date || '')}</span>
-      ${a.imageUrl ? `<img class="article-photo" src="${safeText(a.imageUrl)}" alt="${safeText(a.title)}">` : `<div class="article-hero">${safeText(a.emoji || '📰')}</div>`}
+      ${a.imageUrl ? `<img src="${safeText(a.imageUrl)}" alt="${safeText(a.title)}" style="width:100%;max-height:340px;object-fit:cover;border-radius:14px;margin:15px 0">` : `<div class="article-hero">${safeText(a.emoji || '📰')}</div>`}
       <h2 class="article-title">${safeText(a.title)}</h2>
-      <p class="article-text" style="white-space:pre-wrap">${safeText((a.body && a.body !== a.summary) ? a.body : (a.summary || 'इस खबर का विवरण उपलब्ध नहीं है। मूल स्रोत पर पढ़ें।'))}</p>
+      <p class="article-text">${safeText(a.summary)}</p>
+      <p class="article-text" style="white-space:pre-wrap">${safeText(a.body)}</p>
       ${a.externalUrl ? `<p><a class="read-btn" href="${safeText(a.externalUrl)}" target="_blank" rel="noopener">मूल स्रोत पर पढ़ें ↗️</a></p>` : ''}
       ${a.demo ? '<div class="notice">यह डेमो सामग्री है। इसे वास्तविक समाचार समझकर साझा न करें।</div>' : ''}
       <div class="dialog-actions">
@@ -249,8 +247,17 @@ document.getElementById('adminLogin').onclick = async () => {
   try {
     await signInWithEmailAndPassword(auth, email, password);
   } catch (err) {
-    alert('लॉगिन नहीं हुआ। ईमेल/पासवर्ड और Firebase Authentication सेटिंग जाँचें।');
-    console.error(err);
+    console.error('Firebase sign-in failed:', err.code, err.message);
+    const messages = {
+      'auth/invalid-credential': 'ईमेल या पासवर्ड सही नहीं है। Firebase Authentication → Users में इसी ईमेल का अकाउंट जाँचें; जरूरत हो तो Reset password करें।',
+      'auth/wrong-password': 'पासवर्ड गलत है। Firebase Authentication → Users से Reset password करें।',
+      'auth/user-not-found': 'यह ईमेल Firebase Authentication → Users में नहीं मिला। सही ईमेल वाला अकाउंट बनाएँ।',
+      'auth/invalid-email': 'ईमेल का फॉर्मेट सही नहीं है।',
+      'auth/too-many-requests': 'कई बार गलत कोशिश हुई है। थोड़ी देर बाद फिर कोशिश करें।',
+      'auth/unauthorized-domain': 'इस वेबसाइट का domain Firebase में अनुमति प्राप्त नहीं है। Authentication → Settings → Authorized domains में indiaupdate1996-droid.github.io जोड़ें (स्पेस/अक्षर बिल्कुल सही रखें)।',
+      'auth/network-request-failed': 'इंटरनेट कनेक्शन या ब्राउज़र नेटवर्क में समस्या है। कनेक्शन जाँचकर पेज Refresh करें।'
+    };
+    alert(messages[err.code] || ('लॉगिन विफल: ' + (err.code || 'अज्ञात त्रुटि') + '\n' + (err.message || 'Firebase Authentication जाँचें।')));
   }
 };
 
@@ -272,13 +279,16 @@ onAuthStateChanged(auth, async user => {
         document.getElementById('adminStatus').textContent = 'लॉगिन सफल। प्रकाशित खबरें सभी पाठकों को दिखेंगी।';
       } else {
         document.getElementById('adminStatus').textContent =
-          'इस अकाउंट को एडमिन अनुमति नहीं मिली है। Firebase Console में admins/' + user.uid + ' दस्तावेज़ में role = admin होना चाहिए।';
+          'इस लॉगिन UID को admins सूची में admin अनुमति नहीं मिली। Firebase Console में admins/' + user.uid + ' दस्तावेज़ और role = admin जाँचें।';
         document.getElementById('adminForm').classList.add('hidden');
         document.getElementById('loginForm').classList.remove('hidden');
       }
     } catch (err) {
-      console.error(err);
-      document.getElementById('adminStatus').textContent = 'एडमिन अनुमति जाँच नहीं सकी। Firestore Rules और इंटरनेट कनेक्शन जाँचें।';
+      console.error('Admin permission lookup failed:', err.code, err.message);
+      document.getElementById('adminStatus').textContent =
+        'एडमिन अनुमति जाँच विफल (' + (err.code || 'unknown') + ')। Firestore Rules में admins दस्तावेज़ पढ़ने की अनुमति जाँचें।';
+      document.getElementById('adminForm').classList.add('hidden');
+      document.getElementById('loginForm').classList.remove('hidden');
     }
   }
 
@@ -296,11 +306,11 @@ onAuthStateChanged(auth, async user => {
           date:x.createdAt?.toDate ? x.createdAt.toDate().toLocaleString('hi-IN') : (x.date || 'नई खबर'),
           title:x.title || '',
           summary:x.summary || '',
-          body:x.body || x.content || '',
+          body:x.body || '',
           color:x.color || 'custom',
           externalUrl:x.externalUrl || '',
           source:x.source || '',
-          imageUrl:x.imageUrl || '',
+          imageUrl:x.imageUrl || ''
         };
       });
 
@@ -326,7 +336,7 @@ document.getElementById('publishNews').onclick = async () => {
   const category = document.getElementById('newsCategory').value;
   const summary = document.getElementById('newsSummary').value.trim();
   const body = document.getElementById('newsBody').value.trim();
-  const imageFile = document.getElementById('newsImage').files[0] || null;
+  const imageFile = document.getElementById('newsImage').files[0];
 
   if (!title || !summary || !body) {
     alert('शीर्षक, विवरण और पूरी खबर भरें।');
@@ -336,34 +346,15 @@ document.getElementById('publishNews').onclick = async () => {
   try {
     let imageUrl = '';
     if (imageFile) {
-      if (!imageFile.type.startsWith('image/')) {
-        throw new Error('कृपया JPG, PNG या WebP फोटो चुनें।');
-      }
-      if (imageFile.size > 5 * 1024 * 1024) {
-        throw new Error('फोटो 5 MB से छोटी होनी चाहिए।');
-      }
-
       const formData = new FormData();
       formData.append('file', imageFile);
       formData.append('upload_preset', 'india_update_news');
-
-      const uploadResponse = await fetch(
-        'https://api.cloudinary.com/v1_1/rkftintg/image/upload',
-        { method: 'POST', body: formData }
-      );
-      let uploadResult;
-      try {
-        uploadResult = await uploadResponse.json();
-      } catch {
-        throw new Error('Cloudinary से पढ़ने योग्य जवाब नहीं मिला। Upload Preset और Cloud Name जाँचें।');
-      }
-
-      if (!uploadResponse.ok || !uploadResult.secure_url) {
-        const cloudinaryMessage = uploadResult?.error?.message || 'Unknown Cloudinary error';
-        throw new Error(`Cloudinary (${uploadResponse.status}): ${cloudinaryMessage}`);
-      }
+      const uploadResponse = await fetch('https://api.cloudinary.com/v1_1/rkfting/image/upload', { method:'POST', body:formData });
+      const uploadResult = await uploadResponse.json();
+      if (!uploadResponse.ok || !uploadResult.secure_url) throw new Error(uploadResult.error?.message || 'Cloudinary upload failed');
       imageUrl = uploadResult.secure_url;
     }
+
     await addDoc(collection(db, 'news'), {
       title,
       category,
@@ -372,18 +363,19 @@ document.getElementById('publishNews').onclick = async () => {
       emoji:categoryEmoji[category] || '📰',
       color:'custom',
       source:'admin',
-      imageUrl,
       createdAt:serverTimestamp(),
-      externalUrl:''
+      externalUrl:'',
+      imageUrl
     });
 
     document.getElementById('newsTitle').value = '';
+    document.getElementById('newsImage').value = '';
     document.getElementById('newsSummary').value = '';
     document.getElementById('newsBody').value = '';
     document.getElementById('adminStatus').textContent = 'खबर ऑनलाइन प्रकाशित हो गई। सभी पाठकों के पेज पर अपडेट आएगा।';
   } catch (err) {
     console.error(err);
-    alert(err.message || 'खबर प्रकाशित नहीं हुई। Firebase Storage चालू है और Storage Rules प्रकाशित हैं, यह जाँचें।');
+    alert('खबर प्रकाशित नहीं हुई: ' + (err.message || 'Firestore/Cloudinary सेटिंग जाँचें।'));
   }
 };
 
@@ -400,17 +392,6 @@ document.getElementById('adminNewsList').addEventListener('click', async e => {
     console.error(err);
     alert('खबर नहीं हट सकी। Firebase Rules जाँचें।');
   }
-});
-
-const newsImageInput = document.getElementById('newsImage');
-newsImageInput.addEventListener('change', () => {
-  const file = newsImageInput.files[0];
-  const preview = document.getElementById('imagePreview');
-  if (!file) { preview.classList.add('hidden'); preview.removeAttribute('src'); return; }
-  if (!file.type.startsWith('image/')) { alert('कृपया फोटो फ़ाइल चुनें।'); newsImageInput.value = ''; preview.classList.add('hidden'); return; }
-  if (file.size > 5 * 1024 * 1024) { alert('फोटो 5 MB से छोटी होनी चाहिए।'); newsImageInput.value = ''; preview.classList.add('hidden'); return; }
-  preview.src = URL.createObjectURL(file);
-  preview.classList.remove('hidden');
 });
 
 document.getElementById('exportNews').onclick = () => {
@@ -441,46 +422,19 @@ document.getElementById('autoNewsBtn').onclick = async () => {
 
     let added = 0;
 
-    const seenTitles = new Set(allArticles().map(a => (a.title || '').trim().toLocaleLowerCase('hi')));
-
     for (const it of data.items.slice(0, 12)) {
       const title = (it.title || '').replace(/\s-\s[^-]+$/, '').trim();
-      const normalizedTitle = title.toLocaleLowerCase('hi');
-      if (!title || seenTitles.has(normalizedTitle)) continue;
-      seenTitles.add(normalizedTitle);
 
-      // RSS photos: use explicit thumbnail/enclosure, or extract first inline image.
-      const rssContent = it.content || it.description || it.contentSnippet || '';
-      const inlineImg = (rssContent.match(/<img[^>]+src=[\"']([^\"']+)[\"']/i) || [])[1] || '';
-      const rssImage = it.thumbnail || it.enclosure?.link || it.enclosure?.url || inlineImg || '';
-      let extracted = { imageUrl: '', articleText: '' };
-      const workerUrl = 'https://round-grass-939e.indiaupdate1996.workers.dev/';
-      try {
-        if (it.link) {
-          const response = await fetch(workerUrl + '?url=' + encodeURIComponent(it.link));
-          if (response.ok) {
-            const result = await response.json();
-            extracted = {
-              imageUrl: result.imageUrl || '',
-              articleText: (result.articleText || result.text || '').trim()
-            };
-          }
-        }
-      } catch (e) {
-        console.log('Article extraction failed; RSS fallback used', e);
-      }
+      if (!title || allArticles().some(a => a.title === title)) continue;
 
-      // RSS description is a fallback; do not claim it is the full article.
-      const cleanRss = rssContent.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&quot;/g, '\"').replace(/&#39;/g, "'").replace(/\s+/g, ' ').trim();
-      const articleText = extracted.articleText || cleanRss;
       const item = {
         title,
-        category: 'देश',
-        summary: articleText ? articleText.substring(0, 250) : 'Google News से प्राप्त खबर',
-        body: articleText || 'मूल स्रोत पर खबर पढ़ें।',
-        externalUrl: it.link || '',
-        imageUrl: extracted.imageUrl || rssImage || '',
-        createdAt: serverTimestamp()
+        category:'देश',
+        summary:'यह शीर्षक Google News RSS से प्राप्त हुआ है। पूरी खबर पढ़ने और पुष्टि के लिए मूल स्रोत खोलें।',
+        body:'स्वचालित RSS सुर्खी। इस ऐप में पूरी खबर का लेख नहीं आया है। स्रोत लिंक: ' + (it.link || ''),
+        externalUrl:it.link || '',
+        source:'rss',
+        createdAt:serverTimestamp()
       };
 
       if (isAdmin) {
