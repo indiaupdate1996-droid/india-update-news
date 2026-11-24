@@ -162,7 +162,7 @@ grid.addEventListener('click', async e => {
     render();
   }
 
-  const cardClick = cardOpen && !e.target.closest('button, a, [data-save], [data-share], [data-read]');
+  const cardClick = !!cardOpen && !e.target.closest('button, a, [data-save], [data-share], [data-read]');
   if (read || cardClick) {
     const articleId = read ? read.dataset.read : cardOpen.dataset.open;
     const a = findArticle(articleId);
@@ -172,8 +172,7 @@ grid.addEventListener('click', async e => {
       <span class="eyebrow red">${safeText(a.category)} · ${safeText(a.date || '')}</span>
       ${a.imageUrl ? `<img class="article-photo" src="${safeText(a.imageUrl)}" alt="${safeText(a.title)}">` : `<div class="article-hero">${safeText(a.emoji || '📰')}</div>`}
       <h2 class="article-title">${safeText(a.title)}</h2>
-      <p class="article-text">${safeText(a.summary)}</p>
-      <p class="article-text" style="white-space:pre-wrap">${safeText(a.body)}</p>
+      <p class="article-text" style="white-space:pre-wrap">${safeText((a.body && a.body !== a.summary) ? a.body : (a.summary || 'इस खबर का विवरण उपलब्ध नहीं है। मूल स्रोत पर पढ़ें।'))}</p>
       ${a.externalUrl ? `<p><a class="read-btn" href="${safeText(a.externalUrl)}" target="_blank" rel="noopener">मूल स्रोत पर पढ़ें ↗️</a></p>` : ''}
       ${a.demo ? '<div class="notice">यह डेमो सामग्री है। इसे वास्तविक समाचार समझकर साझा न करें।</div>' : ''}
       <div class="dialog-actions">
