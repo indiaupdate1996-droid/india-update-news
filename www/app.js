@@ -370,52 +370,92 @@ onAuthStateChanged(auth, async user => {
   render();
 });
 
-// AI News Writer panel is statically placed in index.html for reliable visibility.
+// AI News Writer (Direct Gemini API)
 const aiNewsGenerateButton = document.getElementById('aiNewsGenerate');
+const geminiKeyInput = document.getElementById('geminiApiKey');
+
+// Saved API Key auto-fill
+if (geminiKeyInput) {
+  const savedKey = localStorage.getItem('indiaUpdate_geminiKey');
+  if (savedKey) geminiKeyInput.value = savedKey;
+}
+
 aiNewsGenerateButton?.addEventListener('click', async () => {
+  const apiKey = geminiKeyInput?.value.trim();
   const source = document.getElementById('aiNewsSource').value.trim();
   const statusEl = document.getElementById('aiNewsStatus');
   const metaEl = document.getElementById('aiNewsMeta');
+
   if (!isAdmin || !auth.currentUser) {
     statusEl.textContent = 'पहले एडमिन लॉगिन करें।';
+    return;
+  }
+  if (!apiKey) {
+    statusEl.textContent = '⚠️ कृपया पहले अपनी Gemini API Key डालें।';
+    geminiKeyInput?.focus();
     return;
   }
   if (!source) {
     statusEl.textContent = 'पहले स्रोत की खबर या मुख्य तथ्य पेस्ट करें।';
     return;
   }
+
+  localStorage.setItem('indiaUpdate_geminiKey', apiKey);
   aiNewsGenerateButton.disabled = true;
-  statusEl.textContent = 'AI खबर तैयार कर रहा है…';
+  statusEl.textContent = '⏳ AI खबर तैयार कर रहा है…';
   metaEl.textContent = '';
+
+  const prompt = `आप 'India Update' हिंदी न्यूज़ पोर्टल के सीनियर एडिटर हैं। नीचे दी गई जानकारी को तथ्य सुरक्षित रखते हुए एक प्रोफेशनल, सरल और मौलिक हिंदी समाचार में बदलें।
+सिर्फ नीचे दिए JSON फॉर्मेट में जवाब दें:
+{
+  "title": "आकर्षक हिंदी हेडलाइन (अधिकतम 15 शब्द)",
+  "category": "इनमें से ठीक एक चुनें: राजस्थान, देश, दुनिया, राजनीति, व्यापार, खेल, मनोरंजन",
+  "summary": "2 लाइन का सटीक और छोटा विवरण",
+  "body": "पूरी खबर 3-4 छोटे और स्पष्ट पैराग्राफ में"
+}
+
+स्रोत खबर:
+${source}`;
+
   try {
-    const idToken = await auth.currentUser.getIdToken();
-    const response = await fetch('https://round-grass-939e.indiaupdate1996.workers.dev/ai-news', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
-      body: JSON.stringify({ source })
-    });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || `AI अनुरोध असफल (${response.status})`);
-    const draft = result.article || result.news || result.output || result;
-    if (!draft.title || !draft.summary || !draft.body) throw new Error('AI का जवाब अधूरा है। दोबारा प्रयास करें।');
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: 'application/json' }
+        })
+      }
+    );
+
+    const data = await response.json();
+    if (!response.ok || data.error) {
+      throw new Error(data.error?.message || `AI अनुरोध असफल (${response.status})`);
+    }
+
+    const draft = JSON.parse(data.candidates[0].content.parts[0].text);
+    if (!draft.title || !draft.summary || !draft.body) {
+      throw new Error('AI का जवाब अधूरा है। दोबारा प्रयास करें।');
+    }
+
     document.getElementById('newsTitle').value = draft.title;
     document.getElementById('newsSummary').value = draft.summary;
     document.getElementById('newsBody').value = draft.body;
+
     if (draft.category) {
       const categorySelect = document.getElementById('newsCategory');
-      if ([...categorySelect.options].some(o => o.value === draft.category)) categorySelect.value = draft.category;
+      if ([...categorySelect.options].some(o => o.value === draft.category.trim())) {
+        categorySelect.value = draft.category.trim();
+      }
     }
-    const details = [
-      draft.seoTitle ? `SEO शीर्षक: ${draft.seoTitle}` : '',
-      draft.keywords ? `कीवर्ड: ${Array.isArray(draft.keywords) ? draft.keywords.join(', ') : draft.keywords}` : '',
-      draft.socialPost ? `सोशल पोस्ट: ${draft.socialPost}` : '',
-      draft.imagePrompt ? `इमेज प्रॉम्प्ट: ${draft.imagePrompt}` : ''
-    ].filter(Boolean).join('\n\n');
-    metaEl.textContent = details;
-    statusEl.textContent = 'ड्राफ्ट फ़ॉर्म में भर गया है। जाँच/संपादन करें; प्रकाशित करने के लिए नीचे मौजूदा Publish बटन दबाएँ।';
+
+    metaEl.textContent = `चुनी गई श्रेणी: ${draft.category || 'देश'}`;
+    statusEl.textContent = '✅ ड्राफ्ट फ़ॉर्म में भर गया है। जाँच करें और नीचे Publish बटन दबाएँ।';
   } catch (err) {
     console.error('AI News Writer error:', err);
-    statusEl.textContent = err.message || 'AI खबर तैयार नहीं कर पाया।';
+    statusEl.textContent = '❌ ' + (err.message || 'AI खबर तैयार नहीं कर पाया।');
   } finally {
     aiNewsGenerateButton.disabled = false;
   }
