@@ -66,17 +66,50 @@ function safeText(v = '') {
 }
 
 function extractRssImage(item) {
-  const direct = [item.thumbnail, item.enclosure?.link, item.enclosure?.url, item.image, item.imageUrl];
-  for (const candidate of direct) {
-    const u = typeof candidate === 'string' ? candidate : candidate?.url || candidate?.link;
-    if (u && /^https:\/\//i.test(u)) return u;
+  const candidates = [
+    item.thumbnail,
+    item.enclosure?.link,
+    item.enclosure?.url,
+    item.enclosure,
+    item.image,
+    item.imageUrl,
+    item.media?.content?.url,
+    item.media?.thumbnail?.url,
+    item.media_thumbnail,
+    item.content,
+    item.description,
+    item.contentSnippet
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && /^https?:\/\/.+\.(jpg|jpeg|png|webp)(\?.*)?$/i.test(candidate)) {
+      return candidate.replace(/^http:\/\//i, 'https://');
+    }
+
+    if (candidate && typeof candidate === 'object') {
+      const url = candidate.url || candidate.link || candidate.src;
+      if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
+        return url.replace(/^http:\/\//i, 'https://');
+      }
+    }
   }
-  const html = [item.content, item.description, item.contentSnippet].filter(Boolean).join(' ');
-  const match = html.match(/<img[^>]+src=["']([^"']+)["']/i);
-  if (match && /^https:\/\//i.test(match[1])) return match[1];
+
+  const html = [item.content, item.description, item.contentSnippet]
+    .filter(Boolean)
+    .join(' ');
+
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const img = doc.querySelector('img');
+
+  if (img?.src && /^https?:\/\//i.test(img.src)) {
+    return img.src.replace(/^http:\/\//i, 'https://');
+  }
+
+  const match = html.match(/https?:\/\/[^"'<> ]+\.(jpg|jpeg|png|webp)(\?[^"'<> ]*)?/i);
+  if (match) return match[0].replace(/^http:\/\//i, 'https://');
+
   return '';
 }
-
 
 function render() {
   const q = search.value.trim().toLocaleLowerCase('hi');
