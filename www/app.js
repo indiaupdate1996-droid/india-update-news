@@ -75,7 +75,7 @@ function render() {
   );
 
   grid.innerHTML = list.map(a => `
-    <article class="news-card">
+    <article class="news-card" data-card="${safeText(a.id)}">
       <div class="thumb ${safeText(a.color || 'custom')}" style="${a.imageUrl ? `background-image:linear-gradient(#0002,#0002),url('${safeText(a.imageUrl)}');background-size:cover;background-position:center` : ''}">
         <span class="tag">${safeText(a.category)}</span>
         ${a.imageUrl ? '' : `<span class="emoji">${safeText(a.emoji || '📰')}</span>`}
@@ -150,6 +150,15 @@ function findArticle(id) {
 }
 
 grid.addEventListener('click', async e => {
+  // Card-wide opening: clicks on non-action card areas open the article.
+  if (!e.target.closest('[data-read], [data-save], [data-share], a, input, select, textarea')) {
+    const card = e.target.closest('[data-card]');
+    if (card) {
+      const readButton = card.querySelector('[data-read]');
+      if (readButton) readButton.click();
+      return;
+    }
+  }
   const read = e.target.closest('[data-read]');
   const save = e.target.closest('[data-save]');
   const share = e.target.closest('[data-share]');
