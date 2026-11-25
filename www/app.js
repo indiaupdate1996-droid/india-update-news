@@ -454,18 +454,29 @@ document.getElementById('autoNewsBtn').onclick = async () => {
     for (const it of data.items.slice(0, 12)) {
       const title = (it.title || '').replace(/\s-\s[^-]+$/, '').trim();
 
-      if (!title || allArticles().some(a => a.title === title)) continue;
 
-      const item = {
-        title,
-        category:'देश',
-        summary:'यह शीर्षक Google News RSS से प्राप्त हुआ है। पूरी खबर पढ़ने और पुष्टि के लिए मूल स्रोत खोलें।',
-        body:'स्वचालित RSS सुर्खी। इस ऐप में पूरी खबर का लेख नहीं आया है। स्रोत लिंक: ' + (it.link || ''),
-        externalUrl:it.link || '',
-        imageUrl:extractRssImage(it),
-        source:'rss',
-        createdAt:serverTimestamp()
-      };
+  const imageUrl =
+    it.thumbnail ||
+    it.enclosure?.link ||
+    it.enclosure?.url ||
+    it.image ||
+    it.images?.[0] ||
+    it.media?.content?.url ||
+    it.media_thumbnail?.url ||
+    "";
+
+  if (!title || allArticles().some(a => a.title === title)) continue;
+
+  const item = {
+  title: title,
+  category: 'देश',
+  summary: it.description || it.content || '',
+  body: it.description || it.content || '',
+  externalUrl: it.link || '',
+  imageUrl: imageUrl,
+  source: 'rss',
+  createdAt: serverTimestamp()
+};
 
       if (isAdmin) {
         await addDoc(collection(db, 'news'), item);
