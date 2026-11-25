@@ -365,6 +365,71 @@ onAuthStateChanged(auth, async user => {
   render();
 });
 
+// AI News Writer panel (admin-only; drafts are never auto-published)
+const aiNewsPanel = document.createElement('section');
+aiNewsPanel.id = 'aiNewsWriterPanel';
+aiNewsPanel.style.cssText = 'margin:14px 0;padding:14px;border:1px solid var(--line);border-radius:12px;';
+aiNewsPanel.innerHTML = `
+  <h3 style="margin:0 0 8px">🤖 AI News Writer</h3>
+  <p style="margin:0 0 10px;font-size:13px">खबर का स्रोत टेक्स्ट या मुख्य तथ्य यहाँ पेस्ट करें (केवल लिंक देने से AI लिंक नहीं पढ़ पाएगा)। AI ड्राफ्ट बनाएगा; प्रकाशित करने से पहले जाँचें।</p>
+  <textarea id="aiNewsSource" rows="6" placeholder="स्रोत की खबर / मुख्य तथ्य यहाँ पेस्ट करें…" style="width:100%;box-sizing:border-box;margin-bottom:8px"></textarea>
+  <button id="aiNewsGenerate" type="button">AI से खबर तैयार करें</button>
+  <p id="aiNewsStatus" style="margin:8px 0 0;font-size:13px"></p>
+  <div id="aiNewsMeta" style="margin-top:8px;font-size:13px;white-space:pre-wrap"></div>
+`;
+const publishButtonForAI = document.getElementById('publishNews');
+if (publishButtonForAI?.parentElement) publishButtonForAI.parentElement.insertBefore(aiNewsPanel, publishButtonForAI);
+
+const aiNewsGenerateButton = document.getElementById('aiNewsGenerate');
+aiNewsGenerateButton?.addEventListener('click', async () => {
+  const source = document.getElementById('aiNewsSource').value.trim();
+  const statusEl = document.getElementById('aiNewsStatus');
+  const metaEl = document.getElementById('aiNewsMeta');
+  if (!isAdmin || !auth.currentUser) {
+    statusEl.textContent = 'पहले एडमिन लॉगिन करें।';
+    return;
+  }
+  if (!source) {
+    statusEl.textContent = 'पहले स्रोत की खबर या मुख्य तथ्य पेस्ट करें।';
+    return;
+  }
+  aiNewsGenerateButton.disabled = true;
+  statusEl.textContent = 'AI खबर तैयार कर रहा है…';
+  metaEl.textContent = '';
+  try {
+    const idToken = await auth.currentUser.getIdToken();
+    const response = await fetch('https://round-grass-939e.indiaupdate1996.workers.dev/ai-news', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
+      body: JSON.stringify({ source })
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || `AI अनुरोध असफल (${response.status})`);
+    const draft = result.article || result.news || result.output || result;
+    if (!draft.title || !draft.summary || !draft.body) throw new Error('AI का जवाब अधूरा है। दोबारा प्रयास करें।');
+    document.getElementById('newsTitle').value = draft.title;
+    document.getElementById('newsSummary').value = draft.summary;
+    document.getElementById('newsBody').value = draft.body;
+    if (draft.category) {
+      const categorySelect = document.getElementById('newsCategory');
+      if ([...categorySelect.options].some(o => o.value === draft.category)) categorySelect.value = draft.category;
+    }
+    const details = [
+      draft.seoTitle ? `SEO शीर्षक: ${draft.seoTitle}` : '',
+      draft.keywords ? `कीवर्ड: ${Array.isArray(draft.keywords) ? draft.keywords.join(', ') : draft.keywords}` : '',
+      draft.socialPost ? `सोशल पोस्ट: ${draft.socialPost}` : '',
+      draft.imagePrompt ? `इमेज प्रॉम्प्ट: ${draft.imagePrompt}` : ''
+    ].filter(Boolean).join('\n\n');
+    metaEl.textContent = details;
+    statusEl.textContent = 'ड्राफ्ट फ़ॉर्म में भर गया है। जाँच/संपादन करें; प्रकाशित करने के लिए नीचे मौजूदा Publish बटन दबाएँ।';
+  } catch (err) {
+    console.error('AI News Writer error:', err);
+    statusEl.textContent = err.message || 'AI खबर तैयार नहीं कर पाया।';
+  } finally {
+    aiNewsGenerateButton.disabled = false;
+  }
+});
+
 document.getElementById('publishNews').onclick = async () => {
   if (!isAdmin) {
     alert('आपके अकाउंट को एडमिन अनुमति नहीं है।');
