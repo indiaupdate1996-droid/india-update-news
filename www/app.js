@@ -54,7 +54,9 @@ const categoryEmoji = {
 
 function allArticles() {
   // Published Firebase news takes priority; public RSS is the fallback when Firebase is empty.
-  return cloudArticles.length ? cloudArticles : rssArticles;
+  const realCloud = cloudArticles.filter(a => !a.demo);
+  const realRss = rssArticles.filter(a => !a.demo);
+  return realCloud.length ? realCloud : realRss;
 }
 
 function safeText(v = '') {
@@ -499,9 +501,11 @@ document.getElementById('adminNewsList').addEventListener('click', e => {
   ].join('\n');
   const sourceField = document.getElementById('aiNewsSource');
   sourceField.value = sourceText;
-  document.getElementById('aiNewsStatus').textContent = 'RSS खबर AI Customizer में डाल दी गई है। अब “AI से खबर तैयार करें” दबाएँ।';
+  document.getElementById('aiNewsStatus').textContent = 'RSS खबर AI में भेजी जा रही है…';
   document.getElementById('aiNewsWriterPanel').scrollIntoView({behavior:'smooth', block:'center'});
   sourceField.focus();
+  // One-click workflow: selecting Customize starts AI drafting automatically.
+  aiNewsGenerateButton.click();
 });
 
 // FIXED: admin news delete handler syntax
