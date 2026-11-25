@@ -163,6 +163,7 @@ function renderAdminList() {
         <div style="padding:10px 0;border-bottom:1px solid var(--line)">
           <b>${safeText(a.title)}</b><br>
           <small>${safeText(a.category)} · ${safeText(a.date || '')}</small><br>
+          ${a.source === 'rss' ? `<button class="read-btn" data-customize-rss="${safeText(a.id)}" style="margin:4px 4px 4px 0">🤖 AI से Customize</button>` : ''}
           <button class="read-btn" data-delete-news="${safeText(a.id)}">यह खबर हटाएँ</button>
         </div>
       `).join('')
@@ -494,6 +495,26 @@ document.getElementById('publishNews').onclick = async () => {
     alert(err.message || 'खबर प्रकाशित नहीं हुई। Firebase Storage चालू है और Storage Rules प्रकाशित हैं, यह जाँचें।');
   }
 };
+
+// RSS news can be sent directly into the AI Customizer from the admin list.
+document.getElementById('adminNewsList').addEventListener('click', e => {
+  const b = e.target.closest('[data-customize-rss]');
+  if (!b || !isAdmin) return;
+  const article = cloudArticles.find(a => String(a.id) === String(b.dataset.customizeRss));
+  if (!article) return;
+  const sourceText = [
+    'RSS NEWS — कृपया इस स्रोत खबर को India Update के लिए तथ्य सुरक्षित रखते हुए सरल, मौलिक हिंदी में री-राइट करें।',
+    `शीर्षक: ${article.title || ''}`,
+    `विवरण: ${article.summary || ''}`,
+    `मूल स्रोत लिंक: ${article.externalUrl || 'उपलब्ध नहीं'}`,
+    `स्रोत: ${article.source || 'RSS'}`
+  ].join('\n');
+  const sourceField = document.getElementById('aiNewsSource');
+  sourceField.value = sourceText;
+  document.getElementById('aiNewsStatus').textContent = 'RSS खबर AI Customizer में डाल दी गई है। अब “AI से खबर तैयार करें” दबाएँ।';
+  document.getElementById('aiNewsWriterPanel').scrollIntoView({behavior:'smooth', block:'center'});
+  sourceField.focus();
+});
 
 // FIXED: admin news delete handler syntax
 document.getElementById('adminNewsList').addEventListener('click', async e => {
