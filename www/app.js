@@ -366,21 +366,7 @@ onAuthStateChanged(auth, async user => {
   render();
 });
 
-// AI News Writer panel (admin-only; drafts are never auto-published)
-const aiNewsPanel = document.createElement('section');
-aiNewsPanel.id = 'aiNewsWriterPanel';
-aiNewsPanel.style.cssText = 'margin:14px 0;padding:14px;border:1px solid var(--line);border-radius:12px;';
-aiNewsPanel.innerHTML = `
-  <h3 style="margin:0 0 8px">🤖 AI News Writer</h3>
-  <p style="margin:0 0 10px;font-size:13px">खबर का स्रोत टेक्स्ट या मुख्य तथ्य यहाँ पेस्ट करें (केवल लिंक देने से AI लिंक नहीं पढ़ पाएगा)। AI ड्राफ्ट बनाएगा; प्रकाशित करने से पहले जाँचें।</p>
-  <textarea id="aiNewsSource" rows="6" placeholder="स्रोत की खबर / मुख्य तथ्य यहाँ पेस्ट करें…" style="width:100%;box-sizing:border-box;margin-bottom:8px"></textarea>
-  <button id="aiNewsGenerate" type="button">AI से खबर तैयार करें</button>
-  <p id="aiNewsStatus" style="margin:8px 0 0;font-size:13px"></p>
-  <div id="aiNewsMeta" style="margin-top:8px;font-size:13px;white-space:pre-wrap"></div>
-`;
-const publishButtonForAI = document.getElementById('publishNews');
-if (publishButtonForAI?.parentElement) publishButtonForAI.parentElement.insertBefore(aiNewsPanel, publishButtonForAI);
-
+// AI News Writer panel is statically placed in index.html for reliable visibility.
 const aiNewsGenerateButton = document.getElementById('aiNewsGenerate');
 aiNewsGenerateButton?.addEventListener('click', async () => {
   const source = document.getElementById('aiNewsSource').value.trim();
