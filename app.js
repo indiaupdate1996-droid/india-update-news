@@ -33,6 +33,7 @@ let selectedCategory = 'सभी';
 let savedOnly = false;
 let saved = JSON.parse(localStorage.getItem('iu_saved') || '[]');
 let cloudArticles = [];
+let rssArticles = [];
 let isAdmin = false;
 let unsubscribeNews = null;
 
@@ -52,7 +53,10 @@ const categoryEmoji = {
 };
 
 function allArticles() {
-  return [...cloudArticles, ...articles.filter(a => a.demo)];
+  // Published Firebase news takes priority; public RSS is the fallback when Firebase is empty.
+  const realCloud = cloudArticles.filter(a => !a.demo);
+  const realRss = rssArticles.filter(a => !a.demo);
+  return realCloud.length ? realCloud : realRss;
 }
 
 function safeText(v = '') {
@@ -65,6 +69,52 @@ function safeText(v = '') {
   }[c]));
 }
 
+function extractRssImage(item) {
+  const candidates = [
+    item.thumbnail,
+    item.enclosure?.link,
+    item.enclosure?.url,
+    item.enclosure,
+    item.image,
+    item.imageUrl,
+    item.media?.content?.url,
+    item.media?.thumbnail?.url,
+    item.media_thumbnail,
+    item.content,
+    item.description,
+    item.contentSnippet
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && /^https?:\/\/.+\.(jpg|jpeg|png|webp)(\?.*)?$/i.test(candidate)) {
+      return candidate.replace(/^http:\/\//i, 'https://');
+    }
+
+    if (candidate && typeof candidate === 'object') {
+      const url = candidate.url || candidate.link || candidate.src;
+      if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
+        return url.replace(/^http:\/\//i, 'https://');
+      }
+    }
+  }
+
+  const html = [item.content, item.description, item.contentSnippet]
+    .filter(Boolean)
+    .join(' ');
+
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const img = doc.querySelector('img');
+
+  if (img?.src && /^https?:\/\//i.test(img.src)) {
+    return img.src.replace(/^http:\/\//i, 'https://');
+  }
+
+  const match = html.match(/https?:\/\/[^"'<> ]+\.(jpg|jpeg|png|webp)(\?[^"'<> ]*)?/i);
+  if (match) return match[0].replace(/^http:\/\//i, 'https://');
+
+  return '';
+}
+
 function render() {
   const q = search.value.trim().toLocaleLowerCase('hi');
 
@@ -75,7 +125,7 @@ function render() {
   );
 
   grid.innerHTML = list.map(a => `
-    <article class="news-card" data-open="${safeText(a.id)}" tabindex="0" role="button" aria-label="खबर खोलें: ${safeText(a.title)}">
+    <article class="news-card" data-card="${safeText(a.id)}">
       <div class="thumb ${safeText(a.color || 'custom')}">
         <span class="tag">${safeText(a.category)}</span>
         ${a.imageUrl ? `<img class="news-photo" src="${safeText(a.imageUrl)}" alt="${safeText(a.title)}" loading="lazy">` : `<span class="emoji">${safeText(a.emoji || '📰')}</span>`}
@@ -117,6 +167,7 @@ function renderAdminList() {
         <div style="padding:10px 0;border-bottom:1px solid var(--line)">
           <b>${safeText(a.title)}</b><br>
           <small>${safeText(a.category)} · ${safeText(a.date || '')}</small><br>
+          ${a.source === 'rss' ? `<button class="read-btn" data-customize-rss="${safeText(a.id)}" style="margin:4px 4px 4px 0">🤖 AI से Customize</button>` : ''}
           <button class="read-btn" data-delete-news="${safeText(a.id)}">यह खबर हटाएँ</button>
         </div>
       `).join('')
@@ -150,10 +201,13 @@ function findArticle(id) {
 }
 
 grid.addEventListener('click', async e => {
+  if (!e.target.closest('[data-read], [data-save], [data-share], a, input, select, textarea')) {
+    const card = e.target.closest('[data-card]');
+    if (card) { card.querySelector('[data-read]')?.click(); return; }
+  }
   const read = e.target.closest('[data-read]');
   const save = e.target.closest('[data-save]');
   const share = e.target.closest('[data-share]');
-  const cardOpen = e.target.closest('[data-open]');
 
   if (save) {
     const id = save.dataset.save;
@@ -162,9 +216,8 @@ grid.addEventListener('click', async e => {
     render();
   }
 
-  if (read || (cardOpen && !save && !share)) {
-    const articleId = read ? read.dataset.read : cardOpen.dataset.open;
-    const a = findArticle(articleId);
+  if (read) {
+    const a = findArticle(read.dataset.read);
     if (!a) return;
 
     document.getElementById('articleContent').innerHTML = `
@@ -301,6 +354,7 @@ onAuthStateChanged(auth, async user => {
           externalUrl:x.externalUrl || '',
           source:x.source || '',
           imageUrl:x.imageUrl || '',
+          imagePath:x.imagePath || ''
         };
       });
 
@@ -314,6 +368,97 @@ onAuthStateChanged(auth, async user => {
   );
 
   render();
+});
+
+// AI News Writer (Direct Gemini API)
+const aiNewsGenerateButton = document.getElementById('aiNewsGenerate');
+const geminiKeyInput = document.getElementById('geminiApiKey');
+
+// Saved API Key auto-fill
+if (geminiKeyInput) {
+  const savedKey = localStorage.getItem('indiaUpdate_geminiKey');
+  if (savedKey) geminiKeyInput.value = savedKey;
+}
+
+aiNewsGenerateButton?.addEventListener('click', async () => {
+  const apiKey = geminiKeyInput?.value.trim();
+  const source = document.getElementById('aiNewsSource').value.trim();
+  const statusEl = document.getElementById('aiNewsStatus');
+  const metaEl = document.getElementById('aiNewsMeta');
+
+  if (!isAdmin || !auth.currentUser) {
+    statusEl.textContent = 'पहले एडमिन लॉगिन करें।';
+    return;
+  }
+  if (!apiKey) {
+    statusEl.textContent = '⚠️ कृपया पहले अपनी Gemini API Key डालें।';
+    geminiKeyInput?.focus();
+    return;
+  }
+  if (!source) {
+    statusEl.textContent = 'पहले स्रोत की खबर या मुख्य तथ्य पेस्ट करें।';
+    return;
+  }
+
+  localStorage.setItem('indiaUpdate_geminiKey', apiKey);
+  aiNewsGenerateButton.disabled = true;
+  statusEl.textContent = '⏳ AI खबर तैयार कर रहा है…';
+  metaEl.textContent = '';
+
+  const prompt = `आप 'India Update' हिंदी न्यूज़ पोर्टल के सीनियर एडिटर हैं। नीचे दी गई जानकारी को तथ्य सुरक्षित रखते हुए एक प्रोफेशनल, सरल और मौलिक हिंदी समाचार में बदलें।
+सिर्फ नीचे दिए JSON फॉर्मेट में जवाब दें:
+{
+  "title": "आकर्षक हिंदी हेडलाइन (अधिकतम 15 शब्द)",
+  "category": "इनमें से ठीक एक चुनें: राजस्थान, देश, दुनिया, राजनीति, व्यापार, खेल, मनोरंजन",
+  "summary": "2 लाइन का सटीक और छोटा विवरण",
+  "body": "पूरी खबर 3-4 छोटे और स्पष्ट पैराग्राफ में"
+}
+
+स्रोत खबर:
+${source}`;
+
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: 'application/json' }
+        })
+      }
+    );
+
+    const data = await response.json();
+    if (!response.ok || data.error) {
+      throw new Error(data.error?.message || `AI अनुरोध असफल (${response.status})`);
+    }
+
+    const draft = JSON.parse(data.candidates[0].content.parts[0].text);
+    if (!draft.title || !draft.summary || !draft.body) {
+      throw new Error('AI का जवाब अधूरा है। दोबारा प्रयास करें।');
+    }
+
+    document.getElementById('newsTitle').value = draft.title;
+    document.getElementById('newsSummary').value = draft.summary;
+    document.getElementById('newsBody').value = draft.body;
+
+    if (draft.category) {
+      const categorySelect = document.getElementById('newsCategory');
+      if ([...categorySelect.options].some(o => o.value === draft.category.trim())) {
+        categorySelect.value = draft.category.trim();
+      }
+    }
+
+    metaEl.textContent = `चुनी गई श्रेणी: ${draft.category || 'देश'}`;
+    statusEl.textContent = '✅ ड्राफ्ट फ़ॉर्म में भर गया है। जाँच करें और नीचे Publish बटन दबाएँ।';
+  } catch (err) {
+    console.error('AI News Writer error:', err);
+    statusEl.textContent = '❌ ' + (err.message || 'AI खबर तैयार नहीं कर पाया।');
+  } finally {
+    aiNewsGenerateButton.disabled = false;
+  }
 });
 
 document.getElementById('publishNews').onclick = async () => {
@@ -348,19 +493,13 @@ document.getElementById('publishNews').onclick = async () => {
       formData.append('upload_preset', 'india_update_news');
 
       const uploadResponse = await fetch(
-        'https://api.cloudinary.com/v1_1/rkftintg/image/upload',
+        'https://api.cloudinary.com/v1_1/rkfting/image/upload',
         { method: 'POST', body: formData }
       );
-      let uploadResult;
-      try {
-        uploadResult = await uploadResponse.json();
-      } catch {
-        throw new Error('Cloudinary से पढ़ने योग्य जवाब नहीं मिला। Upload Preset और Cloud Name जाँचें।');
-      }
+      const uploadResult = await uploadResponse.json();
 
       if (!uploadResponse.ok || !uploadResult.secure_url) {
-        const cloudinaryMessage = uploadResult?.error?.message || 'Unknown Cloudinary error';
-        throw new Error(`Cloudinary (${uploadResponse.status}): ${cloudinaryMessage}`);
+        throw new Error(uploadResult.error?.message || 'Cloudinary फोटो अपलोड नहीं हुई।');
       }
       imageUrl = uploadResult.secure_url;
     }
@@ -386,6 +525,28 @@ document.getElementById('publishNews').onclick = async () => {
     alert(err.message || 'खबर प्रकाशित नहीं हुई। Firebase Storage चालू है और Storage Rules प्रकाशित हैं, यह जाँचें।');
   }
 };
+
+// RSS news can be sent directly into the AI Customizer from the admin list.
+document.getElementById('adminNewsList').addEventListener('click', e => {
+  const b = e.target.closest('[data-customize-rss]');
+  if (!b || !isAdmin) return;
+  const article = cloudArticles.find(a => String(a.id) === String(b.dataset.customizeRss));
+  if (!article) return;
+  const sourceText = [
+    'RSS NEWS — कृपया इस स्रोत खबर को India Update के लिए तथ्य सुरक्षित रखते हुए सरल, मौलिक हिंदी में री-राइट करें।',
+    `शीर्षक: ${article.title || ''}`,
+    `विवरण: ${article.summary || ''}`,
+    `मूल स्रोत लिंक: ${article.externalUrl || 'उपलब्ध नहीं'}`,
+    `स्रोत: ${article.source || 'RSS'}`
+  ].join('\n');
+  const sourceField = document.getElementById('aiNewsSource');
+  sourceField.value = sourceText;
+  document.getElementById('aiNewsStatus').textContent = 'RSS खबर AI में भेजी जा रही है…';
+  document.getElementById('aiNewsWriterPanel').scrollIntoView({behavior:'smooth', block:'center'});
+  sourceField.focus();
+  // One-click workflow: selecting Customize starts AI drafting automatically.
+  aiNewsGenerateButton.click();
+});
 
 // FIXED: admin news delete handler syntax
 document.getElementById('adminNewsList').addEventListener('click', async e => {
@@ -422,6 +583,32 @@ document.getElementById('exportNews').onclick = () => {
   URL.revokeObjectURL(a.href);
 };
 
+async function loadPublicRssFallback() {
+  if (cloudArticles.length) return;
+  try {
+    const feed = 'https://news.google.com/rss?hl=hi&gl=IN&ceid=IN:hi';
+    const url = 'https://api.rss2json.com/v1/api.json?rss_url=' + encodeURIComponent(feed);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('RSS service');
+    const data = await res.json();
+    if (!Array.isArray(data.items) || !data.items.length) throw new Error('Empty RSS');
+    rssArticles = data.items.slice(0, 15).map((it, index) => {
+      const title = (it.title || '').replace(/\s-\s[^-]+$/, '').trim();
+      const summary = (it.description || it.content || '').replace(/<[^>]*>/g, '').trim();
+      return { id: 'rss-public-' + index, title, category: 'देश', emoji: '📰',
+        date: it.pubDate ? new Date(it.pubDate).toLocaleString('hi-IN') : 'ताज़ा खबर',
+        summary, body: summary, externalUrl: it.link || '', imageUrl: '', source: 'RSS', color: 'custom' };
+    }).filter(a => a.title);
+    render();
+    document.getElementById('newsNotice').innerHTML = rssArticles.length
+      ? '<span>✓</span> ताज़ा सुर्खियाँ RSS से दिखाई जा रही हैं। खबर प्रकाशित करने से पहले स्रोत की पुष्टि करें।'
+      : '<span>!</span> अभी खबरें उपलब्ध नहीं हैं।';
+  } catch (err) {
+    console.warn('Public RSS fallback failed', err);
+    document.getElementById('newsNotice').innerHTML = '<span>!</span> खबरें लोड नहीं हुईं। इंटरनेट कनेक्शन या RSS सेवा जाँचें।';
+  }
+}
+
 document.getElementById('autoNewsBtn').onclick = async () => {
   const btn = document.getElementById('autoNewsBtn');
   const notice = document.getElementById('newsNotice');
@@ -441,52 +628,32 @@ document.getElementById('autoNewsBtn').onclick = async () => {
 
     let added = 0;
 
-    const seenTitles = new Set(allArticles().map(a => (a.title || '').trim().toLowerCase()));
     for (const it of data.items.slice(0, 12)) {
       const title = (it.title || '').replace(/\s-\s[^-]+$/, '').trim();
-      if (!title || seenTitles.has(title.toLowerCase())) continue;
-      seenTitles.add(title.toLowerCase());
 
-      // RSS descriptions may contain an image HTML tag; use it as a fallback.
-      const rssHtml = [it.content, it.description, it.contentSnippet].filter(Boolean).join(' ');
-      const rssImgMatch = rssHtml.match(/<img[^>]+src=["']([^"']+)["']/i);
-      const rssImage = it.thumbnail || it.enclosure?.link || it.enclosure?.url || rssImgMatch?.[1] || '';
-      let extracted = { imageUrl: '', articleText: '' };
-      const workerUrl = 'https://round-grass-939e.indiaupdate1996.workers.dev/';
-      try {
-        if (it.link) {
-          const response = await fetch(workerUrl + '?url=' + encodeURIComponent(it.link));
-          if (response.ok) {
-            const result = await response.json();
-            if (result && typeof result === 'object') extracted = result;
-          }
-        }
-      } catch (e) {
-        console.log('Article extraction failed', e);
-      }
 
-      // Use the RSS description if full article extraction is blocked/unavailable.
-      const rssDescription = (it.description || it.content || '')
-        .replace(/<[^>]*>/g, ' ')
-        .replace(/&nbsp;|&#160;/gi, ' ')
-        .replace(/&amp;/gi, '&')
-        .replace(/&quot;/gi, '"')
-        .replace(/&#39;/gi, "'")
-        .replace(/&lt;/gi, '<')
-        .replace(/&gt;/gi, '>')
-        .replace(/\s+/g, ' ').trim();
-      const articleText = (extracted.articleText || '').trim();
-      const imageUrl = extracted.imageUrl || rssImage || '';
-      const summaryText = articleText || rssDescription || 'Google News से प्राप्त खबर';
-      const item = {
-        title,
-        category:'देश',
-        summary: summaryText.substring(0, 250),
-        body: articleText || rssDescription || 'पूरी खबर उपलब्ध नहीं हो सकी। मूल स्रोत देखें।',
-        externalUrl: it.link || '',
-        imageUrl,
-        createdAt:serverTimestamp()
-      };
+  const imageUrl =
+    it.thumbnail ||
+    it.enclosure?.link ||
+    it.enclosure?.url ||
+    it.image ||
+    it.images?.[0] ||
+    it.media?.content?.url ||
+    it.media_thumbnail?.url ||
+    "";
+
+  if (!title || allArticles().some(a => a.title === title)) continue;
+
+  const item = {
+  title: title,
+  category: 'देश',
+  summary: it.description || it.content || '',
+  body: it.description || it.content || '',
+  externalUrl: it.link || '',
+  imageUrl: imageUrl,
+  source: 'rss',
+  createdAt: serverTimestamp()
+};
 
       if (isAdmin) {
         await addDoc(collection(db, 'news'), item);
@@ -508,3 +675,5 @@ document.getElementById('autoNewsBtn').onclick = async () => {
 };
 
 render();
+loadPublicRssFallback();
+
