@@ -33,6 +33,7 @@ let selectedCategory = 'सभी';
 let savedOnly = false;
 let saved = JSON.parse(localStorage.getItem('iu_saved') || '[]');
 let cloudArticles = [];
+let rssArticles = [];
 let isAdmin = false;
 let unsubscribeNews = null;
 
@@ -52,7 +53,8 @@ const categoryEmoji = {
 };
 
 function allArticles() {
-  return [...cloudArticles, ...articles.filter(a => a.demo)];
+  // Published Firebase news takes priority; public RSS is the fallback when Firebase is empty.
+  return cloudArticles.length ? cloudArticles : rssArticles;
 }
 
 function safeText(v = '') {
@@ -537,6 +539,32 @@ document.getElementById('exportNews').onclick = () => {
   URL.revokeObjectURL(a.href);
 };
 
+async function loadPublicRssFallback() {
+  if (cloudArticles.length) return;
+  try {
+    const feed = 'https://news.google.com/rss?hl=hi&gl=IN&ceid=IN:hi';
+    const url = 'https://api.rss2json.com/v1/api.json?rss_url=' + encodeURIComponent(feed);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('RSS service');
+    const data = await res.json();
+    if (!Array.isArray(data.items) || !data.items.length) throw new Error('Empty RSS');
+    rssArticles = data.items.slice(0, 15).map((it, index) => {
+      const title = (it.title || '').replace(/\s-\s[^-]+$/, '').trim();
+      const summary = (it.description || it.content || '').replace(/<[^>]*>/g, '').trim();
+      return { id: 'rss-public-' + index, title, category: 'देश', emoji: '📰',
+        date: it.pubDate ? new Date(it.pubDate).toLocaleString('hi-IN') : 'ताज़ा खबर',
+        summary, body: summary, externalUrl: it.link || '', imageUrl: '', source: 'RSS', color: 'custom' };
+    }).filter(a => a.title);
+    render();
+    document.getElementById('newsNotice').innerHTML = rssArticles.length
+      ? '<span>✓</span> ताज़ा सुर्खियाँ RSS से दिखाई जा रही हैं। खबर प्रकाशित करने से पहले स्रोत की पुष्टि करें।'
+      : '<span>!</span> अभी खबरें उपलब्ध नहीं हैं।';
+  } catch (err) {
+    console.warn('Public RSS fallback failed', err);
+    document.getElementById('newsNotice').innerHTML = '<span>!</span> खबरें लोड नहीं हुईं। इंटरनेट कनेक्शन या RSS सेवा जाँचें।';
+  }
+}
+
 document.getElementById('autoNewsBtn').onclick = async () => {
   const btn = document.getElementById('autoNewsBtn');
   const notice = document.getElementById('newsNotice');
@@ -603,3 +631,5 @@ document.getElementById('autoNewsBtn').onclick = async () => {
 };
 
 render();
+loadPublicRssFallback();
+
