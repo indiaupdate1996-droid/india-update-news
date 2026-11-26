@@ -272,9 +272,7 @@ async function shareArticle(a) {
 
 document.getElementById('closeDialog').onclick = () => document.getElementById('articleDialog').close();
 
-document.getElementById('articleDialog').addEventListener('click', e => {
-  if (e.target.id === 'articleDialog') e.target.close();
-});
+
 
 document.getElementById('themeBtn').onclick = () => {
   document.body.classList.toggle('dark');
