@@ -500,23 +500,28 @@ aiImageGenerateButton?.addEventListener('click', async () => {
   if (!aiImagePromptField.value.trim() && prompt) aiImagePromptField.value = prompt;
   if (!isAdmin || !auth.currentUser) { aiImageStatus.textContent = 'पहले एडमिन लॉगिन करें।'; return; }
   if (!prompt) { aiImageStatus.textContent = 'पहले फोटो का दृश्य या प्रॉम्प्ट लिखें।'; return; }
-  aiImageGenerateButton.disabled = true; aiImageStatus.textContent = 'AI फोटो बना रहा है…'; aiImageActions.style.display = 'none'; aiImagePreview.style.display = 'none';
+  aiImageGenerateButton.disabled = true;
+  aiImageStatus.textContent = '⏳ AI फोटो बना रहा है (10-15 सेकंड लग सकते हैं)…';
+  aiImageActions.style.display = 'none';
+  aiImagePreview.style.display = 'none';
   try {
-    const idToken = await auth.currentUser.getIdToken();
-    const response = await fetch('https://round-grass-939e.indiaupdate1996.workers.dev/ai-image', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
-      body: JSON.stringify({ prompt, size: document.getElementById('aiImageSize').value })
-    });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || `AI image request failed (${response.status})`);
-    if (!result.image) throw new Error('AI ने फोटो नहीं लौटाई।');
-    generatedNewsImageBlob = await (await fetch(`data:image/png;base64,${result.image}`)).blob();
+    const [w, h] = (document.getElementById('aiImageSize').value || '1280x720').split('x');
+    const finalPrompt = `Photorealistic editorial news photography, no text, no watermark: ${prompt.slice(0, 300)}`;
+    const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?width=${w}&height=${h}&nologo=true&seed=${Date.now()}`;
+    const response = await fetch(imageUrl);
+    if (!response.ok) throw new Error(`AI फोटो लोड नहीं हुई (${response.status})`);
+    generatedNewsImageBlob = await response.blob();
     if (generatedNewsImageUrl) URL.revokeObjectURL(generatedNewsImageUrl);
     generatedNewsImageUrl = URL.createObjectURL(generatedNewsImageBlob);
-    aiImagePreview.src = generatedNewsImageUrl; aiImagePreview.style.display = 'block'; aiImageActions.style.display = 'flex';
-    aiImageStatus.textContent = 'फोटो तैयार है। इसे खबर में लगाएँ या डाउनलोड करें।';
-  } catch (err) { aiImageStatus.textContent = err.message || 'AI फोटो बनाने में त्रुटि हुई।'; }
-  finally { aiImageGenerateButton.disabled = false; }
+    aiImagePreview.src = generatedNewsImageUrl;
+    aiImagePreview.style.display = 'block';
+    aiImageActions.style.display = 'flex';
+    aiImageStatus.textContent = '✅ फोटो तैयार है। इसे खबर में लगाएँ या डाउनलोड करें।';
+  } catch (err) {
+    aiImageStatus.textContent = '❌ ' + (err.message || 'AI फोटो बनाने में त्रुटि हुई।');
+  } finally {
+    aiImageGenerateButton.disabled = false;
+  }
 });
 aiImageAttachButton?.addEventListener('click', () => {
   if (!generatedNewsImageBlob) { aiImageStatus.textContent = 'पहले फोटो बनाएँ।'; return; }
