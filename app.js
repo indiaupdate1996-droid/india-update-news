@@ -467,6 +467,7 @@ aiImageStudio.style.cssText = 'margin:14px 0;padding:14px;border:1px solid var(-
 aiImageStudio.innerHTML = `
   <h3 style="margin:0 0 8px">🎨 AI News Image Studio</h3>
   <p style="font-size:13px;margin:0 0 10px">खबर के लिए AI फोटो बनाएँ। तैयार फोटो पहले देखें; पसंद आने पर खबर में लगाएँ।</p>
+  <input id="hfApiKey" type="password" placeholder="Hugging Face Token (hf_...) यहाँ पेस्ट करें" style="width:100%;box-sizing:border-box;padding:10px;border:1px solid var(--line);border-radius:9px;margin-bottom:8px">
   <textarea id="aiImagePrompt" rows="4" placeholder="फोटो का दृश्य लिखें…" style="width:100%;box-sizing:border-box;margin-bottom:8px"></textarea>
   <label style="display:block;font-size:13px;margin:6px 0">फोटो आकार
     <select id="aiImageSize" style="width:100%;padding:10px;border:1px solid var(--line);border-radius:9px;margin-top:5px">
@@ -484,6 +485,11 @@ const adminFormForImage = document.getElementById('adminForm');
 if (adminFormForImage && !document.getElementById('aiImageStudio')) adminFormForImage.insertBefore(aiImageStudio, document.getElementById('publishNews'));
 let generatedNewsImageBlob = null;
 let generatedNewsImageUrl = '';
+const hfKeyInput = document.getElementById('hfApiKey');
+if (hfKeyInput) {
+  const savedHfKey = localStorage.getItem('indiaUpdate_hfToken');
+  if (savedHfKey) hfKeyInput.value = savedHfKey;
+}
 const aiImageGenerateButton = document.getElementById('aiImageGenerate');
 const aiImagePromptField = document.getElementById('aiImagePrompt');
 const aiImagePreview = document.getElementById('aiImagePreview');
@@ -491,17 +497,15 @@ const aiImageStatus = document.getElementById('aiImageStatus');
 const aiImageActions = document.getElementById('aiImageActions');
 const aiImageAttachButton = document.getElementById('aiImageAttach');
 const aiImageDownloadButton = document.getElementById('aiImageDownload');
-// Seed the prompt from AI News Writer's image prompt or article text.
-const aiNewsMetaForImage = document.getElementById('aiNewsMeta');
-if (aiImagePromptField && aiNewsMetaForImage) {
-  const imagePromptText = aiNewsMetaForImage.textContent.match(/इमेज प्रॉम्प्ट:\s*([^\n]+)/);
-  if (imagePromptText) aiImagePromptField.value = imagePromptText[1];
-}
+
 aiImageGenerateButton?.addEventListener('click', async () => {
-  const prompt = aiImagePromptField.value.trim() || [document.getElementById('newsTitle').value, document.getElementById('newsSummary').value, document.getElementById('newsBody').value].filter(Boolean).join('\n');
+  const hfToken = hfKeyInput?.value.trim();
+  const prompt = aiImagePromptField.value.trim() || [document.getElementById('newsTitle').value, document.getElementById('newsSummary').value].filter(Boolean).join(' ');
   if (!aiImagePromptField.value.trim() && prompt) aiImagePromptField.value = prompt;
   if (!isAdmin || !auth.currentUser) { aiImageStatus.textContent = 'पहले एडमिन लॉगिन करें।'; return; }
+  if (!hfToken) { aiImageStatus.textContent = '⚠️ कृपया पहले अपना Hugging Face Token डालें।'; hfKeyInput?.focus(); return; }
   if (!prompt) { aiImageStatus.textContent = 'पहले फोटो का दृश्य या प्रॉम्प्ट लिखें।'; return; }
+  localStorage.setItem('indiaUpdate_hfToken', hfToken);
   aiImageGenerateButton.disabled = true;
   aiImageStatus.textContent = '⏳ AI फोटो बना रहा है (10-15 सेकंड लग सकते हैं)…';
   aiImageActions.style.display = 'none';
@@ -509,10 +513,18 @@ aiImageGenerateButton?.addEventListener('click', async () => {
   try {
     const sizeMap = { '1536x1024': [1024, 576], '1024x1536': [576, 1024], '1024x1024': [1024, 1024] };
     const [w, h] = sizeMap[document.getElementById('aiImageSize').value] || [1024, 576];
-    const cleanPrompt = prompt.replace(/[^a-zA-Z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100) || 'India breaking news editorial photography';
-    const finalPrompt = `news photo, realistic, no text: ${cleanPrompt}`;
-    const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?width=${w}&height=${h}&seed=${Date.now()}`;
-    const response = await fetch(imageUrl);
+    const cleanPrompt = prompt.replace(/[^a-zA-Z0-9\s,.-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 150) || 'India breaking news editorial photography';
+    const response = await fetch('https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${hfToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        inputs: `Photorealistic news photography, no text, no watermark: ${cleanPrompt}`,
+        parameters: { width: w, height: h }
+      })
+    });
     if (!response.ok) throw new Error(`AI फोटो लोड नहीं हुई (${response.status})`);
     generatedNewsImageBlob = await response.blob();
     if (generatedNewsImageUrl) URL.revokeObjectURL(generatedNewsImageUrl);
@@ -529,17 +541,18 @@ aiImageGenerateButton?.addEventListener('click', async () => {
 });
 aiImageAttachButton?.addEventListener('click', () => {
   if (!generatedNewsImageBlob) { aiImageStatus.textContent = 'पहले फोटो बनाएँ।'; return; }
-  const file = new File([generatedNewsImageBlob], 'india-update-ai-news.png', { type: 'image/png' });
+  const mime = generatedNewsImageBlob.type || 'image/png';
+  const ext = mime.includes('jpeg') ? 'jpg' : 'png';
+  const file = new File([generatedNewsImageBlob], `india-update-ai-news.${ext}`, { type: mime });
   const dt = new DataTransfer(); dt.items.add(file);
   const input = document.getElementById('newsImage'); input.files = dt.files;
   input.dispatchEvent(new Event('change', { bubbles: true }));
-  aiImageStatus.textContent = 'AI फोटो खबर के फोटो फ़ील्ड में लग गई है। Publish करने से पहले preview जाँचें।';
+  aiImageStatus.textContent = '✅ AI फोटो खबर के फोटो फ़ील्ड में लग गई है। अब Publish दबाएँ।';
 });
 aiImageDownloadButton?.addEventListener('click', () => {
   if (!generatedNewsImageUrl) return;
   const a = document.createElement('a'); a.href = generatedNewsImageUrl; a.download = 'india-update-ai-news.png'; a.click();
 });
-document.getElementById('publishNews').onclick = async () => {
   if (!isAdmin) {
     alert('आपके अकाउंट को एडमिन अनुमति नहीं है।');
     return;
