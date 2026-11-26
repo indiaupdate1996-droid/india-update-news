@@ -514,7 +514,7 @@ aiImageGenerateButton?.addEventListener('click', async () => {
     const sizeMap = { '1536x1024': [1024, 576], '1024x1536': [576, 1024], '1024x1024': [1024, 1024] };
     const [w, h] = sizeMap[document.getElementById('aiImageSize').value] || [1024, 576];
     const cleanPrompt = prompt.replace(/[^a-zA-Z0-9\s,.-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 150) || 'India breaking news editorial photography';
-    const response = await fetch('https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell', {
+    const response = await fetch('https://router.huggingface.co/hf-inference/models/stabilityai/stable-diffusion-xl-base-1.0', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${hfToken}`,
