@@ -553,6 +553,7 @@ aiImageDownloadButton?.addEventListener('click', () => {
   if (!generatedNewsImageUrl) return;
   const a = document.createElement('a'); a.href = generatedNewsImageUrl; a.download = 'india-update-ai-news.png'; a.click();
 });
+document.getElementById('publishNews').onclick = async () => {
   if (!isAdmin) {
     alert('आपके अकाउंट को एडमिन अनुमति नहीं है।');
     return;
