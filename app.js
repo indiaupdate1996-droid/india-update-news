@@ -505,8 +505,10 @@ aiImageGenerateButton?.addEventListener('click', async () => {
   aiImageActions.style.display = 'none';
   aiImagePreview.style.display = 'none';
   try {
-    const [w, h] = (document.getElementById('aiImageSize').value || '1280x720').split('x');
-    const finalPrompt = `Photorealistic editorial news photography, no text, no watermark: ${prompt.slice(0, 300)}`;
+    const sizeMap = { '1536x1024': [1024, 576], '1024x1536': [576, 1024], '1024x1024': [1024, 1024] };
+    const [w, h] = sizeMap[document.getElementById('aiImageSize').value] || [1024, 576];
+    const cleanPrompt = prompt.replace(/\s+/g, ' ').trim().slice(0, 80);
+    const finalPrompt = `news photo, realistic, no text: ${cleanPrompt}`;
     const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?width=${w}&height=${h}&nologo=true&seed=${Date.now()}`;
     const response = await fetch(imageUrl);
     if (!response.ok) throw new Error(`AI फोटो लोड नहीं हुई (${response.status})`);
