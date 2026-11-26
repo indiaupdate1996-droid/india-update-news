@@ -409,7 +409,8 @@ aiNewsGenerateButton?.addEventListener('click', async () => {
   "title": "आकर्षक हिंदी हेडलाइन (अधिकतम 15 शब्द)",
   "category": "इनमें से ठीक एक चुनें: राजस्थान, देश, दुनिया, राजनीति, व्यापार, खेल, मनोरंजन",
   "summary": "2 लाइन का सटीक और छोटा विवरण",
-  "body": "पूरी खबर 3-4 छोटे और स्पष्ट पैराग्राफ में"
+  "body": "पूरी खबर 3-4 छोटे और स्पष्ट पैराग्राफ में",
+  "imagePrompt": "Short 10 word English visual description of this news scene, photorealistic, no text"
 }
 
 स्रोत खबर:
@@ -441,7 +442,8 @@ ${source}`;
     document.getElementById('newsTitle').value = draft.title;
     document.getElementById('newsSummary').value = draft.summary;
     document.getElementById('newsBody').value = draft.body;
-
+    const imgBox = document.getElementById('aiImagePrompt');
+    if (imgBox && draft.imagePrompt) imgBox.value = draft.imagePrompt;
     if (draft.category) {
       const categorySelect = document.getElementById('newsCategory');
       if ([...categorySelect.options].some(o => o.value === draft.category.trim())) {
@@ -507,7 +509,8 @@ aiImageGenerateButton?.addEventListener('click', async () => {
   try {
     const sizeMap = { '1536x1024': [1024, 576], '1024x1536': [576, 1024], '1024x1024': [1024, 1024] };
     const [w, h] = sizeMap[document.getElementById('aiImageSize').value] || [1024, 576];
-    const cleanPrompt = prompt.replace(/\s+/g, ' ').trim().slice(0, 80);
+    const cleanPrompt = prompt.replace(/[^a-zA-Z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100) || 'India breaking news editorial photography';
+```[cite: 13]
     const finalPrompt = `news photo, realistic, no text: ${cleanPrompt}`;
     const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?width=${w}&height=${h}&nologo=true&seed=${Date.now()}`;
     const response = await fetch(imageUrl);
