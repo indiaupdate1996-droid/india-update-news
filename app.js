@@ -33,7 +33,6 @@ let selectedCategory = 'सभी';
 let savedOnly = false;
 let saved = JSON.parse(localStorage.getItem('iu_saved') || '[]');
 let cloudArticles = [];
-let rssArticles = [];
 let isAdmin = false;
 let unsubscribeNews = null;
 
@@ -53,10 +52,7 @@ const categoryEmoji = {
 };
 
 function allArticles() {
-  // Published Firebase news takes priority; public RSS is the fallback when Firebase is empty.
-  const realCloud = cloudArticles.filter(a => !a.demo);
-  const realRss = rssArticles.filter(a => !a.demo);
-  return realCloud.length ? realCloud : realRss;
+  return [...cloudArticles, ...articles.filter(a => a.demo)];
 }
 
 function safeText(v = '') {
@@ -167,7 +163,6 @@ function renderAdminList() {
         <div style="padding:10px 0;border-bottom:1px solid var(--line)">
           <b>${safeText(a.title)}</b><br>
           <small>${safeText(a.category)} · ${safeText(a.date || '')}</small><br>
-          ${a.source === 'rss' ? `<button class="read-btn" data-customize-rss="${safeText(a.id)}" style="margin:4px 4px 4px 0">🤖 AI से Customize</button>` : ''}
           <button class="read-btn" data-delete-news="${safeText(a.id)}">यह खबर हटाएँ</button>
         </div>
       `).join('')
@@ -272,7 +267,9 @@ async function shareArticle(a) {
 
 document.getElementById('closeDialog').onclick = () => document.getElementById('articleDialog').close();
 
-
+document.getElementById('articleDialog').addEventListener('click', e => {
+  if (e.target.id === 'articleDialog') e.target.close();
+});
 
 document.getElementById('themeBtn').onclick = () => {
   document.body.classList.toggle('dark');
@@ -333,6 +330,8 @@ onAuthStateChanged(auth, async user => {
     }
   }
 
+  if (isAdmin) startAutoRssAi(); else if (autoRssAiTimer) { clearInterval(autoRssAiTimer); autoRssAiTimer = null; }
+
   if (unsubscribeNews) unsubscribeNews();
 
   unsubscribeNews = onSnapshot(
@@ -368,191 +367,59 @@ onAuthStateChanged(auth, async user => {
   render();
 });
 
-// AI News Writer (Direct Gemini API)
-const aiNewsGenerateButton = document.getElementById('aiNewsGenerate');
-const geminiKeyInput = document.getElementById('geminiApiKey');
+// Automatic RSS-to-OpenAI draft writer (admin session only; fills the editor, never auto-publishes)
+const autoRssAiStatus = document.createElement('p');
+autoRssAiStatus.id = 'autoRssAiStatus';
+autoRssAiStatus.style.cssText = 'margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:10px;font-size:13px;';
+autoRssAiStatus.textContent = 'ऑटो RSS AI लेखन: एडमिन लॉगिन होने पर नई RSS खबरों की जाँच होगी।';
+const publishButtonForAI = document.getElementById('publishNews');
+if (publishButtonForAI?.parentElement) publishButtonForAI.parentElement.insertBefore(autoRssAiStatus, publishButtonForAI);
 
-// Saved API Key auto-fill
-if (geminiKeyInput) {
-  const savedKey = localStorage.getItem('indiaUpdate_geminiKey');
-  if (savedKey) geminiKeyInput.value = savedKey;
-}
-
-aiNewsGenerateButton?.addEventListener('click', async () => {
-  const apiKey = geminiKeyInput?.value.trim();
-  const source = document.getElementById('aiNewsSource').value.trim();
-  const statusEl = document.getElementById('aiNewsStatus');
-  const metaEl = document.getElementById('aiNewsMeta');
-
-  if (!isAdmin || !auth.currentUser) {
-    statusEl.textContent = 'पहले एडमिन लॉगिन करें।';
-    return;
-  }
-  if (!apiKey) {
-    statusEl.textContent = '⚠️ कृपया पहले अपनी Gemini API Key डालें।';
-    geminiKeyInput?.focus();
-    return;
-  }
-  if (!source) {
-    statusEl.textContent = 'पहले स्रोत की खबर या मुख्य तथ्य पेस्ट करें।';
-    return;
-  }
-
-  localStorage.setItem('indiaUpdate_geminiKey', apiKey);
-  aiNewsGenerateButton.disabled = true;
-  statusEl.textContent = '⏳ AI खबर तैयार कर रहा है…';
-  metaEl.textContent = '';
-
-  const prompt = `आप 'India Update' हिंदी न्यूज़ पोर्टल के सीनियर एडिटर हैं। नीचे दी गई जानकारी को तथ्य सुरक्षित रखते हुए एक प्रोफेशनल, सरल और मौलिक हिंदी समाचार में बदलें।
-सिर्फ नीचे दिए JSON फॉर्मेट में जवाब दें:
-{
-  "title": "आकर्षक हिंदी हेडलाइन (अधिकतम 15 शब्द)",
-  "category": "इनमें से ठीक एक चुनें: राजस्थान, देश, दुनिया, राजनीति, व्यापार, खेल, मनोरंजन",
-  "summary": "2 लाइन का सटीक और छोटा विवरण",
-  "body": "पूरी खबर 3-4 छोटे और स्पष्ट पैराग्राफ में",
-  "imagePrompt": "Short 10 word English visual description of this news scene, photorealistic, no text"
-}
-
-स्रोत खबर:
-${source}`;
-
+const RSS_AUTO_INTERVAL_MS = 10 * 60 * 1000;
+const RSS_AUTO_SEEN_KEY = 'iu_auto_rss_ai_seen_v1';
+let autoRssAiTimer = null;
+let autoRssAiBusy = false;
+function getAutoRssSeen() { try { return JSON.parse(localStorage.getItem(RSS_AUTO_SEEN_KEY) || '[]'); } catch { return []; } }
+function markAutoRssSeen(id) { const seen = getAutoRssSeen(); seen.push(id); localStorage.setItem(RSS_AUTO_SEEN_KEY, JSON.stringify(seen.slice(-300))); }
+async function autoRssAiCheck() {
+  if (!isAdmin || !auth.currentUser || autoRssAiBusy) return;
+  autoRssAiBusy = true;
   try {
-      const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${encodeURIComponent(apiKey)}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { responseMimeType: 'application/json' }
-        })
-      }
-    );
-
-    const data = await response.json();
-    if (!response.ok || data.error) {
-      throw new Error(data.error?.message || `AI अनुरोध असफल (${response.status})`);
-    }
-
-    const draft = JSON.parse(data.candidates[0].content.parts[0].text);
-    if (!draft.title || !draft.summary || !draft.body) {
-      throw new Error('AI का जवाब अधूरा है। दोबारा प्रयास करें।');
-    }
-
+    const feed = 'https://news.google.com/rss?hl=hi&gl=IN&ceid=IN:hi';
+    const rssUrl = 'https://api.rss2json.com/v1/api.json?rss_url=' + encodeURIComponent(feed);
+    const feedRes = await fetch(rssUrl);
+    if (!feedRes.ok) throw new Error('RSS feed request failed');
+    const feedData = await feedRes.json();
+    const seen = new Set(getAutoRssSeen());
+    const candidate = (feedData.items || []).find(item => item.link && item.title && !seen.has(item.link));
+    if (!candidate) { autoRssAiStatus.textContent = 'ऑटो RSS AI चालू है — अभी कोई नई खबर नहीं मिली। अगली जाँच 10 मिनट में होगी।'; return; }
+    autoRssAiStatus.textContent = 'नई RSS खबर मिली — OpenAI से हिंदी ड्राफ्ट तैयार हो रहा है…';
+    const cleanTitle = (candidate.title || '').replace(/\s-\s[^-]+$/, '').trim();
+    const source = ['RSS NEWS — इस स्रोत के तथ्य सुरक्षित रखते हुए मौलिक हिंदी खबर तैयार करें।', `शीर्षक: ${cleanTitle}`, `विवरण: ${candidate.description || candidate.content || ''}`, `मूल स्रोत लिंक: ${candidate.link}`, 'स्रोत: Google News RSS'].join('\n');
+    const idToken = await auth.currentUser.getIdToken();
+    const aiRes = await fetch('https://round-grass-939e.indiaupdate1996.workers.dev/ai-news', { method:'POST', headers:{'Content-Type':'application/json','Authorization':`Bearer ${idToken}`}, body:JSON.stringify({source}) });
+    const aiResult = await aiRes.json();
+    if (!aiRes.ok) throw new Error(aiResult.error || `AI request failed (${aiRes.status})`);
+    const draft = aiResult.article || aiResult.news || aiResult.output || aiResult;
+    if (!draft.title || !draft.summary || !draft.body) throw new Error('AI draft response incomplete');
     document.getElementById('newsTitle').value = draft.title;
     document.getElementById('newsSummary').value = draft.summary;
     document.getElementById('newsBody').value = draft.body;
-    const imgBox = document.getElementById('aiImagePrompt');
-    if (imgBox && draft.imagePrompt) imgBox.value = draft.imagePrompt;
-    if (draft.category) {
-      const categorySelect = document.getElementById('newsCategory');
-      if ([...categorySelect.options].some(o => o.value === draft.category.trim())) {
-        categorySelect.value = draft.category.trim();
-      }
-    }
-
-    metaEl.textContent = `चुनी गई श्रेणी: ${draft.category || 'देश'}`;
-    statusEl.textContent = '✅ ड्राफ्ट फ़ॉर्म में भर गया है। जाँच करें और नीचे Publish बटन दबाएँ।';
+    const categorySelect = document.getElementById('newsCategory');
+    if (draft.category && [...categorySelect.options].some(o => o.value === draft.category)) categorySelect.value = draft.category;
+    markAutoRssSeen(candidate.link);
+    autoRssAiStatus.textContent = 'नई RSS खबर का OpenAI ड्राफ्ट फ़ॉर्म में तैयार है। कृपया जाँचें और नीचे Publish बटन से प्रकाशित करें।';
   } catch (err) {
-    console.error('AI News Writer error:', err);
-    statusEl.textContent = '❌ ' + (err.message || 'AI खबर तैयार नहीं कर पाया।');
-  } finally {
-    aiNewsGenerateButton.disabled = false;
-  }
-});
-// AI News Image Studio: generate, preview, download, or attach to the news form.
-const aiImageStudio = document.createElement('section');
-aiImageStudio.id = 'aiImageStudio';
-aiImageStudio.style.cssText = 'margin:14px 0;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--soft);';
-aiImageStudio.innerHTML = `
-  <h3 style="margin:0 0 8px">🎨 AI News Image Studio</h3>
-  <p style="font-size:13px;margin:0 0 10px">खबर के लिए AI फोटो बनाएँ। तैयार फोटो पहले देखें; पसंद आने पर खबर में लगाएँ।</p>
-  <input id="hfApiKey" type="password" placeholder="Hugging Face Token (hf_...) यहाँ पेस्ट करें" style="width:100%;box-sizing:border-box;padding:10px;border:1px solid var(--line);border-radius:9px;margin-bottom:8px">
-  <textarea id="aiImagePrompt" rows="4" placeholder="फोटो का दृश्य लिखें…" style="width:100%;box-sizing:border-box;margin-bottom:8px"></textarea>
-  <label style="display:block;font-size:13px;margin:6px 0">फोटो आकार
-    <select id="aiImageSize" style="width:100%;padding:10px;border:1px solid var(--line);border-radius:9px;margin-top:5px">
-      <option value="1536x1024">16:9 न्यूज़ (लैंडस्केप)</option><option value="1024x1536">9:16 मोबाइल</option><option value="1024x1024">1:1 वर्ग</option>
-    </select>
-  </label>
-  <button id="aiImageGenerate" type="button" class="read-btn">✨ AI से फोटो बनाएँ</button>
-  <p id="aiImageStatus" style="margin:8px 0;font-size:13px"></p>
-  <img id="aiImagePreview" alt="AI से बनी खबर की फोटो" style="display:none;width:100%;max-height:360px;object-fit:contain;border-radius:12px;margin:8px 0;background:#111">
-  <div id="aiImageActions" style="display:none;gap:8px;flex-wrap:wrap">
-    <button id="aiImageAttach" type="button" class="read-btn">खबर में लगाएँ</button><button id="aiImageDownload" type="button" class="read-btn">फोटो डाउनलोड</button>
-  </div>
-`;
-const adminFormForImage = document.getElementById('adminForm');
-if (adminFormForImage && !document.getElementById('aiImageStudio')) adminFormForImage.insertBefore(aiImageStudio, document.getElementById('publishNews'));
-let generatedNewsImageBlob = null;
-let generatedNewsImageUrl = '';
-const hfKeyInput = document.getElementById('hfApiKey');
-if (hfKeyInput) {
-  const savedHfKey = localStorage.getItem('indiaUpdate_hfToken');
-  if (savedHfKey) hfKeyInput.value = savedHfKey;
+    console.error('Auto RSS AI writer error', err);
+    autoRssAiStatus.textContent = 'ऑटो RSS AI में त्रुटि: ' + (err.message || 'अभी प्रक्रिया नहीं हो सकी।');
+  } finally { autoRssAiBusy = false; }
 }
-const aiImageGenerateButton = document.getElementById('aiImageGenerate');
-const aiImagePromptField = document.getElementById('aiImagePrompt');
-const aiImagePreview = document.getElementById('aiImagePreview');
-const aiImageStatus = document.getElementById('aiImageStatus');
-const aiImageActions = document.getElementById('aiImageActions');
-const aiImageAttachButton = document.getElementById('aiImageAttach');
-const aiImageDownloadButton = document.getElementById('aiImageDownload');
+function startAutoRssAi() {
+  if (autoRssAiTimer) clearInterval(autoRssAiTimer);
+  if (isAdmin) { autoRssAiCheck(); autoRssAiTimer = setInterval(autoRssAiCheck, RSS_AUTO_INTERVAL_MS); }
+}
 
-aiImageGenerateButton?.addEventListener('click', async () => {
-  const hfToken = hfKeyInput?.value.trim();
-  const prompt = aiImagePromptField.value.trim() || [document.getElementById('newsTitle').value, document.getElementById('newsSummary').value].filter(Boolean).join(' ');
-  if (!aiImagePromptField.value.trim() && prompt) aiImagePromptField.value = prompt;
-  if (!isAdmin || !auth.currentUser) { aiImageStatus.textContent = 'पहले एडमिन लॉगिन करें।'; return; }
-  if (!hfToken) { aiImageStatus.textContent = '⚠️ कृपया पहले अपना Hugging Face Token डालें।'; hfKeyInput?.focus(); return; }
-  if (!prompt) { aiImageStatus.textContent = 'पहले फोटो का दृश्य या प्रॉम्प्ट लिखें।'; return; }
-  localStorage.setItem('indiaUpdate_hfToken', hfToken);
-  aiImageGenerateButton.disabled = true;
-  aiImageStatus.textContent = '⏳ AI फोटो बना रहा है (10-15 सेकंड लग सकते हैं)…';
-  aiImageActions.style.display = 'none';
-  aiImagePreview.style.display = 'none';
-  try {
-    const sizeMap = { '1536x1024': [1024, 576], '1024x1536': [576, 1024], '1024x1024': [1024, 1024] };
-    const [w, h] = sizeMap[document.getElementById('aiImageSize').value] || [1024, 576];
-    const cleanPrompt = prompt.replace(/[^a-zA-Z0-9\s,.-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 150) || 'India breaking news editorial photography';
-    const response = await fetch('https://router.huggingface.co/hf-inference/models/stabilityai/stable-diffusion-xl-base-1.0', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${hfToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        inputs: `Photorealistic news photography, no text, no watermark: ${cleanPrompt}`,
-        parameters: { width: w, height: h }
-      })
-    });
-    if (!response.ok) throw new Error(`AI फोटो लोड नहीं हुई (${response.status})`);
-    generatedNewsImageBlob = await response.blob();
-    if (generatedNewsImageUrl) URL.revokeObjectURL(generatedNewsImageUrl);
-    generatedNewsImageUrl = URL.createObjectURL(generatedNewsImageBlob);
-    aiImagePreview.src = generatedNewsImageUrl;
-    aiImagePreview.style.display = 'block';
-    aiImageActions.style.display = 'flex';
-    aiImageStatus.textContent = '✅ फोटो तैयार है। इसे खबर में लगाएँ या डाउनलोड करें।';
-  } catch (err) {
-    aiImageStatus.textContent = '❌ ' + (err.message || 'AI फोटो बनाने में त्रुटि हुई।');
-  } finally {
-    aiImageGenerateButton.disabled = false;
-  }
-});
-aiImageAttachButton?.addEventListener('click', () => {
-  if (!generatedNewsImageBlob) { aiImageStatus.textContent = 'पहले फोटो बनाएँ।'; return; }
-  const mime = generatedNewsImageBlob.type || 'image/png';
-  const ext = mime.includes('jpeg') ? 'jpg' : 'png';
-  const file = new File([generatedNewsImageBlob], `india-update-ai-news.${ext}`, { type: mime });
-  const dt = new DataTransfer(); dt.items.add(file);
-  const input = document.getElementById('newsImage'); input.files = dt.files;
-  input.dispatchEvent(new Event('change', { bubbles: true }));
-  aiImageStatus.textContent = '✅ AI फोटो खबर के फोटो फ़ील्ड में लग गई है। अब Publish दबाएँ।';
-});
-aiImageDownloadButton?.addEventListener('click', () => {
-  if (!generatedNewsImageUrl) return;
-  const a = document.createElement('a'); a.href = generatedNewsImageUrl; a.download = 'india-update-ai-news.png'; a.click();
-});
+
 document.getElementById('publishNews').onclick = async () => {
   if (!isAdmin) {
     alert('आपके अकाउंट को एडमिन अनुमति नहीं है।');
@@ -618,29 +485,6 @@ document.getElementById('publishNews').onclick = async () => {
   }
 };
 
-// RSS news can be sent directly into the AI Customizer from the admin list.
-document.getElementById('adminNewsList').addEventListener('click', e => {
-  const b = e.target.closest('[data-customize-rss]');
-  if (!b || !isAdmin) return;
-  const article = cloudArticles.find(a => String(a.id) === String(b.dataset.customizeRss));
-  if (!article) return;
-  const sourceText = [
-    'RSS NEWS — कृपया इस स्रोत खबर को India Update के लिए तथ्य सुरक्षित रखते हुए सरल, मौलिक हिंदी में री-राइट करें।',
-    `शीर्षक: ${article.title || ''}`,
-    `विवरण: ${article.summary || ''}`,
-    `मूल स्रोत लिंक: ${article.externalUrl || 'उपलब्ध नहीं'}`,
-    `स्रोत: ${article.source || 'RSS'}`
-  ].join('\n');
-  const sourceField = document.getElementById('aiNewsSource');
-  sourceField.value = sourceText;
-  document.getElementById('aiNewsStatus').textContent = 'RSS खबर AI में भेजी जा रही है…';
-  document.getElementById('aiNewsWriterPanel').scrollIntoView({behavior:'smooth', block:'center'});
-  sourceField.focus();
-  // One-click workflow: selecting Customize starts AI drafting automatically.
-  aiNewsGenerateButton.click();
-});
-
-// FIXED: admin news delete handler syntax
 document.getElementById('adminNewsList').addEventListener('click', async e => {
   const b = e.target.closest('[data-delete-news]');
   if (!b || !isAdmin) return;
@@ -674,32 +518,6 @@ document.getElementById('exportNews').onclick = () => {
   a.click();
   URL.revokeObjectURL(a.href);
 };
-
-async function loadPublicRssFallback() {
-  if (cloudArticles.length) return;
-  try {
-    const feed = 'https://news.google.com/rss?hl=hi&gl=IN&ceid=IN:hi';
-    const url = 'https://api.rss2json.com/v1/api.json?rss_url=' + encodeURIComponent(feed);
-    const res = await fetch(url);
-    if (!res.ok) throw new Error('RSS service');
-    const data = await res.json();
-    if (!Array.isArray(data.items) || !data.items.length) throw new Error('Empty RSS');
-    rssArticles = data.items.slice(0, 15).map((it, index) => {
-      const title = (it.title || '').replace(/\s-\s[^-]+$/, '').trim();
-      const summary = (it.description || it.content || '').replace(/<[^>]*>/g, '').trim();
-      return { id: 'rss-public-' + index, title, category: 'देश', emoji: '📰',
-        date: it.pubDate ? new Date(it.pubDate).toLocaleString('hi-IN') : 'ताज़ा खबर',
-        summary, body: summary, externalUrl: it.link || '', imageUrl: '', source: 'RSS', color: 'custom' };
-    }).filter(a => a.title);
-    render();
-    document.getElementById('newsNotice').innerHTML = rssArticles.length
-      ? '<span>✓</span> ताज़ा सुर्खियाँ RSS से दिखाई जा रही हैं। खबर प्रकाशित करने से पहले स्रोत की पुष्टि करें।'
-      : '<span>!</span> अभी खबरें उपलब्ध नहीं हैं।';
-  } catch (err) {
-    console.warn('Public RSS fallback failed', err);
-    document.getElementById('newsNotice').innerHTML = '<span>!</span> खबरें लोड नहीं हुईं। इंटरनेट कनेक्शन या RSS सेवा जाँचें।';
-  }
-}
 
 document.getElementById('autoNewsBtn').onclick = async () => {
   const btn = document.getElementById('autoNewsBtn');
@@ -767,5 +585,3 @@ document.getElementById('autoNewsBtn').onclick = async () => {
 };
 
 render();
-loadPublicRssFallback();
-
