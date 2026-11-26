@@ -511,7 +511,7 @@ aiImageGenerateButton?.addEventListener('click', async () => {
     const [w, h] = sizeMap[document.getElementById('aiImageSize').value] || [1024, 576];
     const cleanPrompt = prompt.replace(/[^a-zA-Z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100) || 'India breaking news editorial photography';
     const finalPrompt = `news photo, realistic, no text: ${cleanPrompt}`;
-    const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?width=${w}&height=${h}&nologo=true&seed=${Date.now()}`;
+    const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?width=${w}&height=${h}&seed=${Date.now()}`;
     const response = await fetch(imageUrl);
     if (!response.ok) throw new Error(`AI फोटो लोड नहीं हुई (${response.status})`);
     generatedNewsImageBlob = await response.blob();
