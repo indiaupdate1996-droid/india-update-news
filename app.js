@@ -163,6 +163,7 @@ function renderAdminList() {
         <div style="padding:10px 0;border-bottom:1px solid var(--line)">
           <b>${safeText(a.title)}</b><br>
           <small>${safeText(a.category)} · ${safeText(a.date || '')}</small><br>
+          ${a.source === 'rss' ? `<button class="read-btn" data-customize-rss="${safeText(a.id)}" style="margin:4px 4px 4px 0">🤖 AI से Customize</button>` : ''}
           <button class="read-btn" data-delete-news="${safeText(a.id)}">यह खबर हटाएँ</button>
         </div>
       `).join('')
@@ -306,6 +307,7 @@ document.getElementById('adminLogout').onclick = () => signOut(auth);
 
 onAuthStateChanged(auth, async user => {
   isAdmin = false;
+  if (rssAutoInterval) { clearInterval(rssAutoInterval); rssAutoInterval = null; }
   document.getElementById('adminForm').classList.add('hidden');
   document.getElementById('loginForm').classList.remove('hidden');
 
@@ -317,7 +319,7 @@ onAuthStateChanged(auth, async user => {
         isAdmin = true;
         document.getElementById('adminForm').classList.remove('hidden');
         document.getElementById('loginForm').classList.add('hidden');
-        document.getElementById('adminStatus').textContent = 'लॉगिन सफल। प्रकाशित खबरें सभी पाठकों को दिखेंगी।';
+        document.getElementById('adminStatus').textContent = 'लॉगिन सफल। प्रकाशित खबरें सभी पाठकों को दिखेंगी।';\n        startAdminRssAutoDraft();
       } else {
         document.getElementById('adminStatus').textContent =
           'इस अकाउंट को एडमिन अनुमति नहीं मिली है। Firebase Console में admins/' + user.uid + ' दस्तावेज़ में role = admin होना चाहिए।';
@@ -329,8 +331,6 @@ onAuthStateChanged(auth, async user => {
       document.getElementById('adminStatus').textContent = 'एडमिन अनुमति जाँच नहीं सकी। Firestore Rules और इंटरनेट कनेक्शन जाँचें।';
     }
   }
-
-  if (isAdmin) startAutoRssAi(); else if (autoRssAiTimer) { clearInterval(autoRssAiTimer); autoRssAiTimer = null; }
 
   if (unsubscribeNews) unsubscribeNews();
 
@@ -367,58 +367,45 @@ onAuthStateChanged(auth, async user => {
   render();
 });
 
-// Automatic RSS-to-OpenAI draft writer (admin session only; fills the editor, never auto-publishes)
-const autoRssAiStatus = document.createElement('p');
-autoRssAiStatus.id = 'autoRssAiStatus';
-autoRssAiStatus.style.cssText = 'margin:10px 0;padding:10px;border:1px solid var(--line);border-radius:10px;font-size:13px;';
-autoRssAiStatus.textContent = 'ऑटो RSS AI लेखन: एडमिन लॉगिन होने पर नई RSS खबरों की जाँच होगी।';
-const publishButtonForAI = document.getElementById('publishNews');
-if (publishButtonForAI?.parentElement) publishButtonForAI.parentElement.insertBefore(autoRssAiStatus, publishButtonForAI);
-
-const RSS_AUTO_INTERVAL_MS = 10 * 60 * 1000;
-const RSS_AUTO_SEEN_KEY = 'iu_auto_rss_ai_seen_v1';
-let autoRssAiTimer = null;
-let autoRssAiBusy = false;
-function getAutoRssSeen() { try { return JSON.parse(localStorage.getItem(RSS_AUTO_SEEN_KEY) || '[]'); } catch { return []; } }
-function markAutoRssSeen(id) { const seen = getAutoRssSeen(); seen.push(id); localStorage.setItem(RSS_AUTO_SEEN_KEY, JSON.stringify(seen.slice(-300))); }
-async function autoRssAiCheck() {
-  if (!isAdmin || !auth.currentUser || autoRssAiBusy) return;
-  autoRssAiBusy = true;
+// AI News Writer panel is already present in index.html; do not inject a duplicate.
+const aiNewsGenerateButton = document.getElementById('aiNewsGenerate');
+async function generateAiDraft(source, statusEl, metaEl) {
+  if (!isAdmin || !auth.currentUser) throw new Error('पहले एडमिन लॉगिन करें।');
+  if (!source) throw new Error('स्रोत की खबर खाली है।');
+  if (aiNewsGenerateButton) aiNewsGenerateButton.disabled = true;
+  if (statusEl) statusEl.textContent = 'OpenAI खबर तैयार कर रहा है…';
+  if (metaEl) metaEl.textContent = '';
   try {
-    const feed = 'https://news.google.com/rss?hl=hi&gl=IN&ceid=IN:hi';
-    const rssUrl = 'https://api.rss2json.com/v1/api.json?rss_url=' + encodeURIComponent(feed);
-    const feedRes = await fetch(rssUrl);
-    if (!feedRes.ok) throw new Error('RSS feed request failed');
-    const feedData = await feedRes.json();
-    const seen = new Set(getAutoRssSeen());
-    const candidate = (feedData.items || []).find(item => item.link && item.title && !seen.has(item.link));
-    if (!candidate) { autoRssAiStatus.textContent = 'ऑटो RSS AI चालू है — अभी कोई नई खबर नहीं मिली। अगली जाँच 10 मिनट में होगी।'; return; }
-    autoRssAiStatus.textContent = 'नई RSS खबर मिली — OpenAI से हिंदी ड्राफ्ट तैयार हो रहा है…';
-    const cleanTitle = (candidate.title || '').replace(/\s-\s[^-]+$/, '').trim();
-    const source = ['RSS NEWS — इस स्रोत के तथ्य सुरक्षित रखते हुए मौलिक हिंदी खबर तैयार करें।', `शीर्षक: ${cleanTitle}`, `विवरण: ${candidate.description || candidate.content || ''}`, `मूल स्रोत लिंक: ${candidate.link}`, 'स्रोत: Google News RSS'].join('\n');
     const idToken = await auth.currentUser.getIdToken();
-    const aiRes = await fetch('https://round-grass-939e.indiaupdate1996.workers.dev/ai-news', { method:'POST', headers:{'Content-Type':'application/json','Authorization':`Bearer ${idToken}`}, body:JSON.stringify({source}) });
-    const aiResult = await aiRes.json();
-    if (!aiRes.ok) throw new Error(aiResult.error || `AI request failed (${aiRes.status})`);
-    const draft = aiResult.article || aiResult.news || aiResult.output || aiResult;
-    if (!draft.title || !draft.summary || !draft.body) throw new Error('AI draft response incomplete');
+    const response = await fetch('https://round-grass-939e.indiaupdate1996.workers.dev/ai-news', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
+      body: JSON.stringify({ source })
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || `AI अनुरोध असफल (${response.status})`);
+    const draft = result.article || result.news || result.output || result;
+    if (!draft.title || !draft.summary || !draft.body) throw new Error('AI का जवाब अधूरा है।');
     document.getElementById('newsTitle').value = draft.title;
     document.getElementById('newsSummary').value = draft.summary;
     document.getElementById('newsBody').value = draft.body;
     const categorySelect = document.getElementById('newsCategory');
     if (draft.category && [...categorySelect.options].some(o => o.value === draft.category)) categorySelect.value = draft.category;
-    markAutoRssSeen(candidate.link);
-    autoRssAiStatus.textContent = 'नई RSS खबर का OpenAI ड्राफ्ट फ़ॉर्म में तैयार है। कृपया जाँचें और नीचे Publish बटन से प्रकाशित करें।';
-  } catch (err) {
-    console.error('Auto RSS AI writer error', err);
-    autoRssAiStatus.textContent = 'ऑटो RSS AI में त्रुटि: ' + (err.message || 'अभी प्रक्रिया नहीं हो सकी।');
-  } finally { autoRssAiBusy = false; }
+    const details = [draft.seoTitle ? `SEO शीर्षक: ${draft.seoTitle}` : '', draft.keywords ? `कीवर्ड: ${Array.isArray(draft.keywords) ? draft.keywords.join(', ') : draft.keywords}` : '', draft.socialPost ? `सोशल पोस्ट: ${draft.socialPost}` : '', draft.imagePrompt ? `इमेज प्रॉम्प्ट: ${draft.imagePrompt}` : ''].filter(Boolean).join('\n\n');
+    if (metaEl) metaEl.textContent = details;
+    if (statusEl) statusEl.textContent = 'AI ड्राफ्ट फॉर्म में तैयार है। समीक्षा करके Publish बटन दबाएँ।';
+    return draft;
+  } finally {
+    if (aiNewsGenerateButton) aiNewsGenerateButton.disabled = false;
+  }
 }
-function startAutoRssAi() {
-  if (autoRssAiTimer) clearInterval(autoRssAiTimer);
-  if (isAdmin) { autoRssAiCheck(); autoRssAiTimer = setInterval(autoRssAiCheck, RSS_AUTO_INTERVAL_MS); }
-}
-
+if (aiNewsGenerateButton) aiNewsGenerateButton.addEventListener('click', async () => {
+  const sourceField = document.getElementById('aiNewsSource');
+  const statusEl = document.getElementById('aiNewsStatus');
+  const metaEl = document.getElementById('aiNewsMeta');
+  try { await generateAiDraft(sourceField.value.trim(), statusEl, metaEl); }
+  catch (err) { console.error('AI News Writer error:', err); statusEl.textContent = err.message || 'AI खबर तैयार नहीं कर पाया।'; }
+});
 
 document.getElementById('publishNews').onclick = async () => {
   if (!isAdmin) {
@@ -485,6 +472,27 @@ document.getElementById('publishNews').onclick = async () => {
   }
 };
 
+// RSS news can be sent directly into the AI Customizer from the admin list.
+document.getElementById('adminNewsList').addEventListener('click', e => {
+  const b = e.target.closest('[data-customize-rss]');
+  if (!b || !isAdmin) return;
+  const article = cloudArticles.find(a => String(a.id) === String(b.dataset.customizeRss));
+  if (!article) return;
+  const sourceText = [
+    'RSS NEWS — कृपया इस स्रोत खबर को India Update के लिए तथ्य सुरक्षित रखते हुए सरल, मौलिक हिंदी में री-राइट करें।',
+    `शीर्षक: ${article.title || ''}`,
+    `विवरण: ${article.summary || ''}`,
+    `मूल स्रोत लिंक: ${article.externalUrl || 'उपलब्ध नहीं'}`,
+    `स्रोत: ${article.source || 'RSS'}`
+  ].join('\n');
+  const sourceField = document.getElementById('aiNewsSource');
+  sourceField.value = sourceText;
+  document.getElementById('aiNewsStatus').textContent = 'RSS खबर AI Customizer में डाल दी गई है। अब “AI से खबर तैयार करें” दबाएँ।';
+  document.getElementById('aiNewsWriterPanel').scrollIntoView({behavior:'smooth', block:'center'});
+  sourceField.focus();
+});
+
+// FIXED: admin news delete handler syntax
 document.getElementById('adminNewsList').addEventListener('click', async e => {
   const b = e.target.closest('[data-delete-news]');
   if (!b || !isAdmin) return;
@@ -519,69 +527,49 @@ document.getElementById('exportNews').onclick = () => {
   URL.revokeObjectURL(a.href);
 };
 
-document.getElementById('autoNewsBtn').onclick = async () => {
+// RSS scan: admin browser polls while logged in; new items are AI-written into the editor as drafts.
+const RSS_AUTO_SEEN_KEY = 'iu_auto_rss_seen_v1';
+let rssAutoBusy = false;
+async function scanRssAndDraft({automatic = false} = {}) {
+  if (rssAutoBusy || !isAdmin || !auth.currentUser) return;
+  rssAutoBusy = true;
   const btn = document.getElementById('autoNewsBtn');
   const notice = document.getElementById('newsNotice');
-
-  btn.disabled = true;
-  notice.innerHTML = '<span>↻</span> RSS से सुर्खियाँ लाने की कोशिश हो रही है…';
-
+  if (btn) btn.disabled = true;
+  if (notice && !automatic) notice.innerHTML = '<span>↻</span> RSS खबरें देखी जा रही हैं…';
   try {
     const feed = 'https://news.google.com/rss?hl=hi&gl=IN&ceid=IN:hi';
-    const url = 'https://api.rss2json.com/v1/api.json?rss_url=' + encodeURIComponent(feed);
-    const res = await fetch(url);
-
-    if (!res.ok) throw new Error('service');
-
+    const res = await fetch('https://api.rss2json.com/v1/api.json?rss_url=' + encodeURIComponent(feed));
+    if (!res.ok) throw new Error('RSS सेवा से खबरें नहीं मिलीं।');
     const data = await res.json();
-    if (!data.items || !data.items.length) throw new Error('empty');
-
-    let added = 0;
-
-    for (const it of data.items.slice(0, 12)) {
-      const title = (it.title || '').replace(/\s-\s[^-]+$/, '').trim();
-
-
-  const imageUrl =
-    it.thumbnail ||
-    it.enclosure?.link ||
-    it.enclosure?.url ||
-    it.image ||
-    it.images?.[0] ||
-    it.media?.content?.url ||
-    it.media_thumbnail?.url ||
-    "";
-
-  if (!title || allArticles().some(a => a.title === title)) continue;
-
-  const item = {
-  title: title,
-  category: 'देश',
-  summary: it.description || it.content || '',
-  body: it.description || it.content || '',
-  externalUrl: it.link || '',
-  imageUrl: imageUrl,
-  source: 'rss',
-  createdAt: serverTimestamp()
-};
-
-      if (isAdmin) {
-        await addDoc(collection(db, 'news'), item);
-        added++;
-      }
-    }
-
-    render();
-
-    notice.innerHTML = isAdmin
-      ? '<span>✓</span> ' + added + ' RSS सुर्खियाँ ऑनलाइन जोड़ी गईं। ये केवल शीर्षक हैं; स्रोत खोलकर पुष्टि करें.'
-      : '<span>!</span> RSS से सुर्खियाँ मिलीं, लेकिन ऑनलाइन प्रकाशित करने के लिए एडमिन लॉगिन करें।';
-  } catch (e) {
-    console.error(e);
-    notice.innerHTML = '<span>!</span> स्वचालित RSS अभी नहीं चला। इंटरनेट या RSS सेवा में समस्या हो सकती है।';
+    if (!Array.isArray(data.items) || !data.items.length) throw new Error('RSS में खबरें नहीं मिलीं।');
+    const seen = new Set(JSON.parse(localStorage.getItem(RSS_AUTO_SEEN_KEY) || '[]'));
+    const fresh = data.items.find(it => it.link && !seen.has(it.link) && !cloudArticles.some(a => a.externalUrl === it.link));
+    if (!fresh) { if (notice && !automatic) notice.textContent = 'कोई नई RSS खबर नहीं मिली।'; return; }
+    const title = (fresh.title || '').replace(/\s-\s[^-]+$/, '').trim();
+    const src = ['RSS खबर (स्रोत तथ्य सुरक्षित रखें; अपुष्ट तथ्य न जोड़ें)', `शीर्षक: ${title}`, `विवरण: ${fresh.description || fresh.content || ''}`, `स्रोत लिंक: ${fresh.link}`].join('\n');
+    const sourceField = document.getElementById('aiNewsSource');
+    sourceField.value = src;
+    await generateAiDraft(src, document.getElementById('aiNewsStatus'), document.getElementById('aiNewsMeta'));
+    seen.add(fresh.link);
+    localStorage.setItem(RSS_AUTO_SEEN_KEY, JSON.stringify([...seen].slice(-300));
+    if (notice) notice.textContent = automatic ? 'नई RSS खबर का AI ड्राफ्ट तैयार है—एडमिन फॉर्म में समीक्षा करें।' : 'नई RSS खबर का AI ड्राफ्ट तैयार है—समीक्षा करके Publish करें।';
+  } catch (err) {
+    console.error('RSS auto draft scan failed', err);
+    if (notice && !automatic) notice.textContent = err.message || 'RSS Auto News नहीं चल पाया।';
   } finally {
-    btn.disabled = false;
+    rssAutoBusy = false;
+    if (btn) btn.disabled = false;
   }
-};
+}
+document.getElementById('autoNewsBtn').onclick = () => scanRssAndDraft({automatic:false});
+let rssAutoInterval = null;
+function startAdminRssAutoDraft() {
+  if (rssAutoInterval) clearInterval(rssAutoInterval);
+  if (!isAdmin) return;
+  // First scan shortly after admin login, then every 10 minutes while this page remains open.
+  setTimeout(() => scanRssAndDraft({automatic:true}), 1500);
+  rssAutoInterval = setInterval(() => scanRssAndDraft({automatic:true}), 10 * 60 * 1000);
+}
 
 render();
