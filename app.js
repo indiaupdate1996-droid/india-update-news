@@ -458,7 +458,78 @@ ${source}`;
     aiNewsGenerateButton.disabled = false;
   }
 });
-
+// AI News Image Studio: generate, preview, download, or attach to the news form.
+const aiImageStudio = document.createElement('section');
+aiImageStudio.id = 'aiImageStudio';
+aiImageStudio.style.cssText = 'margin:14px 0;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--soft);';
+aiImageStudio.innerHTML = `
+  <h3 style="margin:0 0 8px">🎨 AI News Image Studio</h3>
+  <p style="font-size:13px;margin:0 0 10px">खबर के लिए AI फोटो बनाएँ। तैयार फोटो पहले देखें; पसंद आने पर खबर में लगाएँ।</p>
+  <textarea id="aiImagePrompt" rows="4" placeholder="फोटो का दृश्य लिखें…" style="width:100%;box-sizing:border-box;margin-bottom:8px"></textarea>
+  <label style="display:block;font-size:13px;margin:6px 0">फोटो आकार
+    <select id="aiImageSize" style="width:100%;padding:10px;border:1px solid var(--line);border-radius:9px;margin-top:5px">
+      <option value="1536x1024">16:9 न्यूज़ (लैंडस्केप)</option><option value="1024x1536">9:16 मोबाइल</option><option value="1024x1024">1:1 वर्ग</option>
+    </select>
+  </label>
+  <button id="aiImageGenerate" type="button" class="read-btn">✨ AI से फोटो बनाएँ</button>
+  <p id="aiImageStatus" style="margin:8px 0;font-size:13px"></p>
+  <img id="aiImagePreview" alt="AI से बनी खबर की फोटो" style="display:none;width:100%;max-height:360px;object-fit:contain;border-radius:12px;margin:8px 0;background:#111">
+  <div id="aiImageActions" style="display:none;gap:8px;flex-wrap:wrap">
+    <button id="aiImageAttach" type="button" class="read-btn">खबर में लगाएँ</button><button id="aiImageDownload" type="button" class="read-btn">फोटो डाउनलोड</button>
+  </div>
+`;
+const adminFormForImage = document.getElementById('adminForm');
+if (adminFormForImage && !document.getElementById('aiImageStudio')) adminFormForImage.insertBefore(aiImageStudio, document.getElementById('publishNews'));
+let generatedNewsImageBlob = null;
+let generatedNewsImageUrl = '';
+const aiImageGenerateButton = document.getElementById('aiImageGenerate');
+const aiImagePromptField = document.getElementById('aiImagePrompt');
+const aiImagePreview = document.getElementById('aiImagePreview');
+const aiImageStatus = document.getElementById('aiImageStatus');
+const aiImageActions = document.getElementById('aiImageActions');
+const aiImageAttachButton = document.getElementById('aiImageAttach');
+const aiImageDownloadButton = document.getElementById('aiImageDownload');
+// Seed the prompt from AI News Writer's image prompt or article text.
+const aiNewsMetaForImage = document.getElementById('aiNewsMeta');
+if (aiImagePromptField && aiNewsMetaForImage) {
+  const imagePromptText = aiNewsMetaForImage.textContent.match(/इमेज प्रॉम्प्ट:\s*([^\n]+)/);
+  if (imagePromptText) aiImagePromptField.value = imagePromptText[1];
+}
+aiImageGenerateButton?.addEventListener('click', async () => {
+  const prompt = aiImagePromptField.value.trim() || [document.getElementById('newsTitle').value, document.getElementById('newsSummary').value, document.getElementById('newsBody').value].filter(Boolean).join('\n');
+  if (!aiImagePromptField.value.trim() && prompt) aiImagePromptField.value = prompt;
+  if (!isAdmin || !auth.currentUser) { aiImageStatus.textContent = 'पहले एडमिन लॉगिन करें।'; return; }
+  if (!prompt) { aiImageStatus.textContent = 'पहले फोटो का दृश्य या प्रॉम्प्ट लिखें।'; return; }
+  aiImageGenerateButton.disabled = true; aiImageStatus.textContent = 'AI फोटो बना रहा है…'; aiImageActions.style.display = 'none'; aiImagePreview.style.display = 'none';
+  try {
+    const idToken = await auth.currentUser.getIdToken();
+    const response = await fetch('https://round-grass-939e.indiaupdate1996.workers.dev/ai-image', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
+      body: JSON.stringify({ prompt, size: document.getElementById('aiImageSize').value })
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || `AI image request failed (${response.status})`);
+    if (!result.image) throw new Error('AI ने फोटो नहीं लौटाई।');
+    generatedNewsImageBlob = await (await fetch(`data:image/png;base64,${result.image}`)).blob();
+    if (generatedNewsImageUrl) URL.revokeObjectURL(generatedNewsImageUrl);
+    generatedNewsImageUrl = URL.createObjectURL(generatedNewsImageBlob);
+    aiImagePreview.src = generatedNewsImageUrl; aiImagePreview.style.display = 'block'; aiImageActions.style.display = 'flex';
+    aiImageStatus.textContent = 'फोटो तैयार है। इसे खबर में लगाएँ या डाउनलोड करें।';
+  } catch (err) { aiImageStatus.textContent = err.message || 'AI फोटो बनाने में त्रुटि हुई।'; }
+  finally { aiImageGenerateButton.disabled = false; }
+});
+aiImageAttachButton?.addEventListener('click', () => {
+  if (!generatedNewsImageBlob) { aiImageStatus.textContent = 'पहले फोटो बनाएँ।'; return; }
+  const file = new File([generatedNewsImageBlob], 'india-update-ai-news.png', { type: 'image/png' });
+  const dt = new DataTransfer(); dt.items.add(file);
+  const input = document.getElementById('newsImage'); input.files = dt.files;
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+  aiImageStatus.textContent = 'AI फोटो खबर के फोटो फ़ील्ड में लग गई है। Publish करने से पहले preview जाँचें।';
+});
+aiImageDownloadButton?.addEventListener('click', () => {
+  if (!generatedNewsImageUrl) return;
+  const a = document.createElement('a'); a.href = generatedNewsImageUrl; a.download = 'india-update-ai-news.png'; a.click();
+});
 document.getElementById('publishNews').onclick = async () => {
   if (!isAdmin) {
     alert('आपके अकाउंट को एडमिन अनुमति नहीं है।');
